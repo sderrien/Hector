@@ -1,5 +1,7 @@
+
+// Include necessary headers
 #include "TOR/PassDetail.h"
-#include "mlir/Analysis/Utils.h"
+// #include "mlir/Analysis/Utils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OperationSupport.h"
@@ -8,16 +10,16 @@
 #include "llvm/ADT/PriorityQueue.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+// #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "TOR/TOR.h"
 #include "TOR/TORDialect.h"
 #include "TOR/Passes.h"
 
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
-#include "mlir/IR/BlockAndValueMapping.h"
+// #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -25,13 +27,15 @@
 #include "mlir/IR/Matchers.h"
 #include <mlir/Transforms/DialectConversion.h>
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/Utils.h"
+// #include "mlir/Transforms/Utils.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/FoldUtils.h"
 #include "mlir/Rewrite/PatternApplicator.h"
-
 #include "Schedule/SDCSchedule.h"
 #include "nlohmann/json.hpp"
+
+#include "Schedule/DisjointSet.h"
+#include "Schedule/TimeGraph.h"
 
 #include <algorithm>
 #include <cstring>
@@ -42,486 +46,361 @@
 #include <vector>
 #include <unordered_map>
 #include <set>
+
+// Define the debug type for LLVM debugging
 #define DEBUG_TYPE "create-tor"
 
-class DisjointSet {
-public:
-  DisjointSet(int sz) : size(sz) {
-    parent.reserve(size);
-    for (int i = 0; i < size; ++i)
-      parent[i] = i;
-  }
-  int find(int x) {
-    return parent[x] == x ? x : parent[x] = find(parent[x]);
-  }
-  /**
-   * @brief merge x to y. ALERT: x and y are NOT interchangalbe
-   * @param x
-   * @param y
-   */
-  void merge(int x, int y) {
-    parent[find(x)] = find(y);
-  }
-private:
-  int size;
-  std::vector<int> parent;
-};
-
-class TimeGraph
-{
-private:
-  struct Edge
-  {
-    std::string ds;
-    int from, to;
-    int length;
-    int tripcount;
-    int II;
-  };
-
-  int numNode;
-  std::vector<std::vector<Edge>> edge;
-  std::vector<std::vector<Edge>> redge;
-  std::vector<std::pair<int, int>> intvMap;
-public:
-  TimeGraph()
-  {
-    numNode = 1;
-    edge.clear();
-    redge.clear();
-    edge.push_back(std::vector<Edge>());
-    redge.push_back(std::vector<Edge>());
-  }
-  int addNode(int prev, std::string type, int length, int II = -1, int tripcount = -1)
-  {
-    edge.push_back(std::vector<Edge>());
-    redge.push_back(std::vector<Edge>());
-    numNode += 1;
-    edge[prev].push_back(Edge{type, prev, numNode - 1, length, tripcount, II});
-    redge[numNode - 1].push_back(Edge{type, prev, numNode - 1, length, tripcount, II});
-    return numNode - 1;
-  }
-  void addEdge(int from, int to,
-               std::string type, int length, int II = -1, int tripcount = -1)
-  {
-    edge[from].push_back(Edge{type, from, to, length, tripcount, II});
-    redge[to].push_back(Edge{type, from, to, length, tripcount, II});
-  }
-  mlir::Attribute makeAttr(mlir::MLIRContext *ctx,  Edge &edge)
-  {
-    llvm::SmallVector<mlir::NamedAttribute, 4> attrs;
-    std::string retStr(edge.ds);
-
-    if (edge.length > 0)
-      retStr += std::string(":") + std::to_string(edge.length);
-    attrs.push_back(std::make_pair(mlir::Identifier::get("type", ctx), 
-        mlir::StringAttr::get(ctx, retStr)));
-
-    if (edge.II != -1) {
-      attrs.push_back(std::make_pair(mlir::Identifier::get("pipeline", ctx), 
-          mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 32), 1)));
-      attrs.push_back(std::make_pair(mlir::Identifier::get("II", ctx), 
-          mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 32), edge.II)));
-    }
-
-    if (edge.tripcount != -1)
-      attrs.push_back(std::make_pair(mlir::Identifier::get("times", ctx), 
-        mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 32), edge.tripcount)));
-
-    mlir::DictionaryAttr dict = mlir::DictionaryAttr::get(ctx, attrs);
-    return dict;
-  }
-  void print()
-  {
-    std::cout << "-----Here is Time Graph-----" << std::endl;
-    for (int i = 0; i < numNode; i++)
-    {
-      std::cout << i << ": ";
-      for (auto e : edge[i])
-      {
-        std::cout << e.to << "(" << e.length << ") ";
-      }
-      std::cout << std::endl;
-    }
-    std::cout << "-----------------------------" << std::endl;
-  }
-
-  void rewrite(mlir::Region &region, mlir::PatternRewriter &rewriter)
-  {
-    std::vector<std::vector<mlir::Attribute>> froms(numNode);
-    std::vector<std::vector<mlir::Attribute>> attrs(numNode);
-
-    for (int i = 0; i < numNode; i++)
-    {
-      for (auto e : edge[i])
-      {
-        froms[e.to].push_back(
-            mlir::IntegerAttr::get(
-                mlir::IntegerType::get(region.getContext(), 32, mlir::IntegerType::Signless),
-                e.from));
-        attrs[e.to].push_back(makeAttr(region.getContext(), e));
-      }
-    }
-
-    mlir::Location loc = region.getLoc();
-    rewriter.setInsertionPointToStart(&region.front());
-    auto timeGraphOp = rewriter.create<mlir::tor::TimeGraphOp>(loc, 0, numNode - 1);
-    rewriter.createBlock(&timeGraphOp.getBodyRegion());
-    rewriter.setInsertionPointToStart(timeGraphOp.getBody());
-
-    // Assume start-time is 0
-    for (int i = 1; i < numNode; i++)
-    {
-      rewriter.create<mlir::tor::SuccTimeOp>(loc, i,
-                                              mlir::ArrayAttr::get(region.getContext(), froms[i]),
-                                              mlir::ArrayAttr::get(region.getContext(), attrs[i]));
-    }
-    rewriter.create<mlir::tor::FinishOp>(loc);
-  }
-
-  /**
-   * @brief remove the nodes whose indegs are 1 and length are 0
-   */
-  void canonicalize(std::vector<int> &newId) {
-    DisjointSet dset(numNode);
-    for (int i = 1; i < numNode; ++i) {
-      if (redge[i].size() > 1)
-        continue;
-      auto &e = redge[i][0];
-      if (e.ds == "static" && e.length == 0) {
-        llvm::outs() << i << " " << e.ds << " " << e.length << "\n";
-        dset.merge(i, e.from);
-      }
-    }
-    
-    int reducedNum = 0;
-    //std::vector<int> newId(numNode, 0);
-    newId.resize(numNode);
-
-    for (int i = 0; i < numNode; ++i)
-      if (dset.find(i) == i)
-        newId[i] = reducedNum++;
-
-    for (int i = 0; i < numNode; ++i)
-      if (dset.find(i) != i)
-        newId[i] = newId[dset.find(i)];
-
-    llvm::outs() << numNode << " " << reducedNum << "\n";
-
-    std::vector<std::vector<Edge>> oldedges(std::move(edge));
-    std::vector<std::vector<Edge>> oldredges(std::move(redge));
-    
-    edge.resize(reducedNum);
-    redge.resize(reducedNum);
-    
-    for (int i = 0; i < numNode; ++i)
-      for (auto &e : oldedges[i]) {
-        int u = dset.find(e.from), v = dset.find(e.to);
-        if (u == v)
-          continue;
-        
-        addEdge(newId[u], newId[v], e.ds, e.length, e.II, e.tripcount);
-      }
-
-    numNode = reducedNum;
-  }
-};
-
+// Function to set interval attributes on an operation
 void setIntvAttr(mlir::Operation *op, std::pair<int, int> intv) {
-  op->setAttr("starttime", mlir::IntegerAttr::get(
-      mlir::IntegerType::get(op->getContext(), 32, mlir::IntegerType::Signless),
-      intv.first));
+    op->setAttr("starttime",
+                mlir::IntegerAttr::get(
+                        mlir::IntegerType::get(op->getContext(), 32, mlir::IntegerType::Signless),
+                        intv.first));
 
-  op->setAttr("endtime", mlir::IntegerAttr::get(
-      mlir::IntegerType::get(op->getContext(), 32, mlir::IntegerType::Signless),
-      intv.second));
+    op->setAttr("endtime",
+                mlir::IntegerAttr::get(
+                        mlir::IntegerType::get(op->getContext(), 32, mlir::IntegerType::Signless),
+                        intv.second));
 }
 
-int buildTimeGraphBlock(TimeGraph &tg, 
-    std::vector<mlir::Operation*> &vec, 
-    int prev,
-    scheduling::ScheduleBase *scheduler) 
-{
-  std::set<int> timeStamp;
-  std::map<int, int> ts2Node;
+// Function to build a time graph block
+int buildTimeGraphBlock(TimeGraph &tg,
+                        std::vector<mlir::Operation *> &vec,
+                        int prev,
+                        scheduling::ScheduleBase *scheduler) {
+    std::set<int> timeStamp;
+    std::map<int, int> ts2Node;
 
-  for (auto op : vec) {
-    auto intv = scheduler->queryOp(op);
-    // this op runs in [intv.fist, intv.second + 1)
-    timeStamp.insert(intv.first);
-    timeStamp.insert(intv.second);
-  }
+    for (auto op : vec) {
 
-  int last = -1;
-  for (auto ts : timeStamp) {
-    int node = -1;
-
-    if (last != -1)
-      node = tg.addNode(prev, "static", ts - last);
-    else
-      node = tg.addNode(prev, "static", 0);
-
-    ts2Node[ts] = node;
-    prev = node;
-    last = ts;
-  }
-
-  for (auto op : vec) {
-    auto cycle = scheduler->queryOp(op);
-    auto intv = std::make_pair(ts2Node[cycle.first], ts2Node[cycle.second]);
-    setIntvAttr(op, intv);
-  }
-  
-  vec.clear();
-  return prev;
-}
-
-int buildTimeGraph(TimeGraph &tg, 
-                   mlir::Block &block, 
-                   int prev, 
-                   scheduling::ScheduleBase *scheduler) 
-{
-  int currentNode = prev;
-
-  std::vector<mlir::Operation*> vec;
-
-  for (auto &op : block) {
-    if (auto ifOp = llvm::dyn_cast<mlir::tor::IfOp>(op)) {
-
-      currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
-
-      if (!ifOp.elseRegion().empty()) {
-
-        int thenNode = buildTimeGraph(tg, ifOp.thenRegion().front(), currentNode, scheduler);
-        int elseNode = buildTimeGraph(tg, ifOp.elseRegion().front(), currentNode, scheduler);
-        int nxtNode = tg.addNode(thenNode, "static", 0);
-
-        tg.addEdge(elseNode, nxtNode, "static", 0);
-        setIntvAttr(&op, std::make_pair(currentNode, nxtNode));
-        currentNode = nxtNode;
-      } else {
-
-        int thenNode = buildTimeGraph(tg, ifOp.thenRegion().front(), currentNode, scheduler);
-        //int nxtNode = tg.addNode(thenNode, "static", 0);
-        int nxtNode = thenNode;
-
-        setIntvAttr(&op, std::make_pair(currentNode, nxtNode));
-        currentNode = nxtNode;
-      }
-
-    } else if (auto whileOp = llvm::dyn_cast<mlir::tor::WhileOp>(op)) {
-
-      currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
-      int beginNode = tg.addNode(currentNode, "static", 0);
-      int condNode = buildTimeGraph(tg, whileOp.before().front(), beginNode, scheduler);
-      int endNode = buildTimeGraph(tg, whileOp.after().front(), condNode, scheduler); // body
-      int nxtNode = 0;
-
-      auto info = scheduler->queryLoop(&op);
-
-      if (info.first == true) {
-        op.setAttr("pipeline",
-                   mlir::IntegerAttr::get(
-                       mlir::IntegerType::get(op.getContext(), 32), 1));
-
-        op.setAttr("II",
-                   mlir::IntegerAttr::get(
-                       mlir::IntegerType::get(op.getContext(), 32), info.second));
-      }
-
-      nxtNode = tg.addNode(beginNode, "static-while", 0, info.second);
-      
-      setIntvAttr(&op, std::make_pair(beginNode, endNode));
-      currentNode = nxtNode;
-    } else if (auto forOp = llvm::dyn_cast<mlir::tor::ForOp>(op)) {
-
-      currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
-      int beginNode = tg.addNode(currentNode, "static", 0);
-      int endNode = buildTimeGraph(tg, *forOp.getBody(), beginNode, scheduler);
-      int nxtNode = 0;
-
-      auto info = scheduler->queryLoop(&op);
-
-      if (info.first == true) {
-        op.setAttr("pipeline",
-                   mlir::IntegerAttr::get(
-                       mlir::IntegerType::get(op.getContext(), 32), 1));
-
-        op.setAttr("II",
-                   mlir::IntegerAttr::get(
-                       mlir::IntegerType::get(op.getContext(), 32), info.second));
-      }
-      
-      nxtNode = tg.addNode(beginNode, "static-for", 0, info.second);
-      
-      setIntvAttr(&op, std::make_pair(beginNode, endNode));
-      currentNode = nxtNode;
-    } else {
-      if (llvm::isa<mlir::tor::YieldOp>(op))
-        continue;
-      if (llvm::isa<mlir::tor::ConditionOp>(op))
-        continue;
-      if (llvm::isa<mlir::tor::ReturnOp>(op))
-        continue;
-      if (llvm::isa<mlir::ConstantOp>(op))
-        continue;
-
-      vec.push_back(&op);
+        auto intv = scheduler->queryOp(op);
+        // The operation runs in [intv.first, intv.second + 1)
+        timeStamp.insert(intv.first);
+        timeStamp.insert(intv.second);
+        llvm::outs() << "building time graph block for " << *op << " -> ["<< intv.first<<":"<< intv.second<<"]\n";
     }
-  }
 
-  if (!vec.empty()) 
-    currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
-  
-  return currentNode;
-}
+    int last = -1;
+    int currentNode = prev;
 
-mlir::LogicalResult removeExtraEdges(mlir::tor::FuncOp funcOp, TimeGraph *tg) {
-  std::vector<int> newId;
-  tg->canonicalize(newId);
-  if (funcOp.walk(
-    [&] (mlir::Operation *op) {
-      if (op->getDialect()->getNamespace() != mlir::tor::TORDialect::getDialectNamespace())
-        return mlir::WalkResult::skip();
-      if (auto starttime = op->getAttrOfType<mlir::IntegerAttr>("starttime")) {
-        auto t = starttime.getInt();
-        op->setAttr("starttime", mlir::IntegerAttr::get(mlir::IntegerType::get(funcOp.getContext(), 32), newId[t]));
-      }
-      if (auto endtime = op->getAttrOfType<mlir::IntegerAttr>("endttime")) {
-        auto t = endtime.getInt();
-        op->setAttr("endtime", mlir::IntegerAttr::get(mlir::IntegerType::get(funcOp.getContext(), 32), newId[t]));
-      }
+    // Create nodes based on timestamps
+    for (auto ts : timeStamp) {
+        int node;
 
+        if (last != -1)
+            node = tg.addNode(currentNode, "static", ts - last);
+        else
+            node = tg.addNode(currentNode, "static", 0);
 
-      return mlir::WalkResult::advance();
+        ts2Node[ts] = node;
+        currentNode = node;
+        last = ts;
     }
-  ).wasInterrupted())
-    return mlir::failure();
-  return mlir::success();
-}
 
-mlir::LogicalResult scheduleOps(mlir::tor::FuncOp funcOp,
-                                mlir::PatternRewriter &rewriter)
-{
-  using namespace scheduling;
-  if (auto strategy = funcOp->getAttrOfType<StringAttr>("strategy")) {
-    llvm::outs() << funcOp->getName() << " is dynamic. No static scheduling\n";
-    if (strategy.getValue().str() == "dynamic")
-      return mlir::success();
-  }
-  
-  std::unique_ptr<SDCSchedule> scheduler = 
-      std::make_unique<SDCSchedule>(SDCSchedule(funcOp.getOperation()));
-
-  if (mlir::succeeded(scheduler->runSchedule()))
-    llvm::outs() << "Schedule Succeeded\n";
-  else {
-    llvm::outs() << "Schedule Failed\n";
-    return mlir::failure();
-  }
-
-  scheduler->printSchedule();
-
-  TimeGraph *tg = new TimeGraph();
-
-  buildTimeGraph(*tg, funcOp.getRegion().front(), 0, scheduler.get());
-
-  /*
-  if (failed(removeExtraEdges(funcOp, tg)))
-    return mlir::failure();
-  */
-
-  tg->rewrite(funcOp.getBody(), rewriter);
-
-  return mlir::success();
-}
-
-namespace mlir
-{
-  struct FuncOpLowering : public OpRewritePattern<mlir::tor::FuncOp>
-  {
-    using OpRewritePattern<mlir::tor::FuncOp>::OpRewritePattern;
-
-    LogicalResult
-    matchAndRewrite(mlir::tor::FuncOp funcOp,
-                    PatternRewriter &rewriter) const override
-    {
-      llvm::SmallVector<NamedAttribute, 4> attributes;
-      for (const auto &attr : funcOp->getAttrs())
-      {
-        if (attr.first == SymbolTable::getSymbolAttrName() ||
-            attr.first == impl::getTypeAttrName())
-          continue;
-        attributes.push_back(attr);
-      }
-
-      llvm::SmallVector<mlir::Type, 8> argTypes;
-      for (auto &arg : funcOp.getArguments())
-      {
-        mlir::Type type = arg.getType();
-        argTypes.push_back(type);
-      }
-
-      llvm::SmallVector<mlir::Type, 8> resTypes;
-      for (auto &resultType : funcOp.getType().getResults())
-      {
-        resTypes.push_back(resultType);
-      }
-
-      //   // Add control input/output to function arguments/results
-      // auto noneType = rewriter.getNoneType();
-      // argTypes.push_back(noneType);
-      // resTypes.push_back(noneType);
-
-      // Signature conversion (converts function arguments)
-      int arg_count = funcOp.getNumArguments() + 1;
-      TypeConverter::SignatureConversion result(arg_count);
-
-      for (unsigned idx = 0, e = argTypes.size(); idx < e; ++idx)
-        result.addInputs(idx, argTypes[idx]);
-
-      // Create function of appropriate type
-      auto func_type = rewriter.getFunctionType(argTypes, resTypes);
-      auto newFuncOp = rewriter.create<mlir::tor::FuncOp>(
-          funcOp.getLoc(), funcOp.getName(), func_type, attributes);
-
-      rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
-                                  newFuncOp.end());
-      
-      if (failed(scheduleOps(newFuncOp, rewriter)))
-        return failure();
-
-      rewriter.eraseOp(funcOp);
-
-      return success();
+    // Assign interval attributes to operations
+    for (auto op : vec) {
+        auto cycle = scheduler->queryOp(op);
+        auto intv = std::make_pair(ts2Node[cycle.first], ts2Node[cycle.second]);
+        setIntvAttr(op, intv);
+        llvm::outs() << "setting attribute  [" << intv.first << ":" << intv.second << "] for " << *op << "\n";
     }
-  };
 
-  struct TORSchedulePass : public TORScheduleBase<TORSchedulePass>
-  {
-    void runOnOperation() override {
-      mlir::tor::DesignOp designOp = getOperation();
-      
-      auto result = designOp.walk(
-        [&] (tor::FuncOp op) {
-          // IterativeConstantFolding(op);
-	  mlir::RewritePatternSet patterns(&getContext());
-	  patterns.insert<FuncOpLowering>(designOp.getContext());
-          if (failed(applyOpPatternsAndFold(op, std::move(patterns))))
-            WalkResult::interrupt();
-          return WalkResult::advance();
+    vec.clear();
+    llvm::outs() << "time graph block built\n";
+    return currentNode;
+}
+
+// Function to build the entire time graph recursively
+int buildTimeGraph(TimeGraph &tg,
+                   mlir::Block &block,
+                   int prev,
+                   scheduling::ScheduleBase *scheduler) {
+    int currentNode = prev;
+    std::vector<mlir::Operation *> vec; // Buffer for sequential operations
+
+    for (auto &op : block) {
+        llvm::outs() << "building time graph for " << op << "\n";
+
+        if (auto ifOp = llvm::dyn_cast<mlir::tor::IfOp>(op)) {
+            // Handle IfOp by processing then and else regions
+            currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
+
+            if (!ifOp.getElseRegion().empty()) {
+                int thenNode = buildTimeGraph(tg, ifOp.getThenRegion().front(), currentNode, scheduler);
+                int elseNode = buildTimeGraph(tg, ifOp.getElseRegion().front(), currentNode, scheduler);
+                int nxtNode = tg.addNode(thenNode, "static", 0);
+
+                // Connect else branch to the next node
+                tg.addEdge(elseNode, nxtNode, "static", 0);
+                setIntvAttr(&op, std::make_pair(currentNode, nxtNode));
+                currentNode = nxtNode;
+            } else {
+                // Only then branch exists
+                int thenNode = buildTimeGraph(tg, ifOp.getThenRegion().front(), currentNode, scheduler);
+                setIntvAttr(&op, std::make_pair(currentNode, thenNode));
+                currentNode = thenNode;
+            }
+
+        } else if (auto whileOp = llvm::dyn_cast<mlir::tor::WhileOp>(op)) {
+            // Handle WhileOp by processing before and after regions
+            currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
+            int beginNode = tg.addNode(currentNode, "static", 0);
+            int condNode = buildTimeGraph(tg, whileOp.getBefore().front(), beginNode, scheduler);
+            int endNode = buildTimeGraph(tg, whileOp.getAfter().front(), condNode, scheduler); // Body
+
+            auto info = scheduler->queryLoop(&op);
+
+            if (info.first) { // If pipelined
+                op.setAttr("pipeline",
+                           mlir::IntegerAttr::get(
+                                   mlir::IntegerType::get(op.getContext(), 32), 1));
+
+                op.setAttr("II",
+                           mlir::IntegerAttr::get(
+                                   mlir::IntegerType::get(op.getContext(), 32), info.second));
+            }
+
+            // Create a node representing the end of the loop
+            int nxtNode = tg.addNode(beginNode, "static-while", 0, info.second);
+            setIntvAttr(&op, std::make_pair(beginNode, endNode));
+            currentNode = nxtNode;
+
+        } else if (auto forOp = llvm::dyn_cast<mlir::tor::ForOp>(op)) {
+            // Handle ForOp similarly to WhileOp
+            currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
+            int beginNode = tg.addNode(currentNode, "static", 0);
+            int endNode = buildTimeGraph(tg, *forOp.getBody(), beginNode, scheduler);
+
+            auto info = scheduler->queryLoop(&op);
+
+            if (info.first) { // If pipelined
+                op.setAttr("pipeline",
+                           mlir::IntegerAttr::get(
+                                   mlir::IntegerType::get(op.getContext(), 32), 1));
+
+                op.setAttr("II",
+                           mlir::IntegerAttr::get(
+                                   mlir::IntegerType::get(op.getContext(), 32), info.second));
+            }
+
+            // Create a node representing the end of the loop
+            int nxtNode = tg.addNode(beginNode, "static-for", 0, info.second);
+            setIntvAttr(&op, std::make_pair(beginNode, endNode));
+            currentNode = nxtNode;
+
+        } else {
+            // Handle other operations
+            if (llvm::isa<mlir::tor::YieldOp>(op) ||
+                llvm::isa<mlir::tor::ConditionOp>(op) ||
+                llvm::isa<mlir::tor::ReturnOp>(op) ||
+                llvm::isa<mlir::arith::ConstantOp>(op)) {
+                continue; // Skip certain operations
+            }
+            llvm::outs() << "adding " << op << " to be scheduled\n";
+            vec.push_back(&op); // Buffer the operation for sequential processing
         }
-      );
-
-      if (result.wasInterrupted())
-        signalPassFailure();
     }
-  };
 
-  std::unique_ptr<mlir::OperationPass<mlir::tor::DesignOp>>
-  createTORSchedulePass()
-  {
-    return std::make_unique<TORSchedulePass>();
-  }
+    llvm::outs() << "process any remaining buffered operations \n";
+    // Process any remaining buffered operations
+    if (!vec.empty())
+        currentNode = buildTimeGraphBlock(tg, vec, currentNode, scheduler);
+
+    llvm::outs() << "finished building time graph \n";
+    return currentNode;
+}
+
+// Function to remove extra edges and update attributes
+mlir::LogicalResult removeExtraEdges(mlir::tor::FuncOp funcOp, TimeGraph *tg) {
+    std::vector<int> newId;
+    tg->canonicalize(newId); // Canonicalize the time graph
+
+    // Walk through the function operations to update attributes
+    if (funcOp.walk([&](mlir::Operation *op) -> mlir::WalkResult {
+        if (op->getDialect()->getNamespace() != mlir::tor::TORDialect::getDialectNamespace())
+            return mlir::WalkResult::skip();
+
+        // Update 'starttime' attribute
+        if (auto starttime = op->getAttrOfType<mlir::IntegerAttr>("starttime")) {
+            int t = starttime.getInt();
+            op->setAttr("starttime",
+                        mlir::IntegerAttr::get(
+                                mlir::IntegerType::get(funcOp.getContext(), 32),
+                                newId[t]));
+        }
+
+        // Update 'endtime' attribute
+        if (auto endtime = op->getAttrOfType<mlir::IntegerAttr>("endtime")) {
+            int t = endtime.getInt();
+            op->setAttr("endtime",
+                        mlir::IntegerAttr::get(
+                                mlir::IntegerType::get(funcOp.getContext(), 32),
+                                newId[t]));
+        }
+
+        return mlir::WalkResult::advance();
+    }).wasInterrupted())
+        return mlir::failure();
+
+    return mlir::success();
+}
+
+// Function to schedule operations within a TOR function
+mlir::LogicalResult scheduleOps(mlir::tor::FuncOp funcOp,
+                                mlir::PatternRewriter &rewriter) {
+    llvm::outs() << "scheduling function " << funcOp.getName() << "\n";
+
+    using namespace scheduling;
+    if (auto strategy = funcOp->getAttrOfType<mlir::StringAttr>("strategy")) {
+        llvm::outs() << funcOp->getName() << " is dynamic. No static scheduling\n";
+        if (strategy.getValue().str() == "dynamic")
+            return mlir::success();
+    }
+
+    std::unique_ptr<SDCSchedule> scheduler =
+            std::make_unique<SDCSchedule>(SDCSchedule(funcOp.getOperation()));
+
+    if (mlir::succeeded(scheduler->runSchedule()))
+        llvm::outs() << "Schedule Succeeded\n";
+    else {
+        llvm::outs() << "Schedule Failed\n";
+        return mlir::failure();
+    }
+
+    llvm::outs() << "scheduling done " << funcOp.getName() << "\n";
+    scheduler->printSchedule();
+
+    TimeGraph tg; // Use the separated TimeGraph class
+
+    buildTimeGraph(tg, funcOp.getRegion().front(), 0, scheduler.get());
+
+    /*
+    if (failed(removeExtraEdges(funcOp, &tg)))
+        return mlir::failure();
+    */
+
+    tg.rewrite(funcOp.getBody(), rewriter);
+
+    return mlir::success();
+}
+
+// ========================================
+// MLIR Pattern Rewriting
+// ========================================
+
+namespace mlir {
+    /**
+     * @brief Pattern for lowering TOR functions.
+     */
+    struct FuncOpLowering : public OpRewritePattern<mlir::tor::FuncOp> {
+        using OpRewritePattern<mlir::tor::FuncOp>::OpRewritePattern;
+
+        /**
+         * @brief Matches and rewrites TOR function operations.
+         * @param funcOp The TOR function operation to match.
+         * @param rewriter The pattern rewriter.
+         * @return LogicalResult indicating success or failure.
+         */
+        LogicalResult
+        matchAndRewrite(mlir::tor::FuncOp funcOp,
+                        PatternRewriter &rewriter) const override {
+            llvm::SmallVector<NamedAttribute, 4> attributes;
+            // skip if already scheduled
+            if (funcOp->getAttrOfType<BoolAttr>("scheduled")) {
+                llvm::outs() << funcOp.getName() <<" is already scheduled\n";
+                return failure();
+            }
+
+            // Exclude symbol and type attributes
+            std::string typeAttrName = "function_type"; // Placeholder for actual type attr name
+            for (const auto &attr : funcOp->getAttrs()) {
+                if (attr.getName() == SymbolTable::getSymbolAttrName() ||
+                    attr.getName() == typeAttrName) {
+                    continue;
+                }
+                attributes.push_back(attr);
+            }
+
+            // Collect argument types
+            llvm::SmallVector<mlir::Type, 8> argTypes;
+            for (auto &arg : funcOp.getArguments()) {
+                argTypes.push_back(arg.getType());
+            }
+
+            // Collect result types
+            llvm::SmallVector<mlir::Type, 8> resTypes;
+            for (auto &resultType : funcOp.getResultTypes()) {
+                resTypes.push_back(resultType);
+            }
+
+            // Signature conversion for function arguments
+            int arg_count = funcOp.getNumArguments() + 1; // Extra argument for control
+            TypeConverter::SignatureConversion result(arg_count);
+            for (unsigned idx = 0, e = argTypes.size(); idx < e; ++idx)
+                result.addInputs(idx, argTypes[idx]);
+
+            // Create the new function type
+            auto func_type = rewriter.getFunctionType(argTypes, resTypes);
+
+            // Create a new TOR function operation with the updated type and attributes
+            auto newFuncOp = rewriter.create<mlir::tor::FuncOp>(
+                    funcOp.getLoc(), funcOp.getName(), func_type, attributes);
+
+            newFuncOp->setAttr("scheduled",mlir::BoolAttr::get(getContext(), true));
+
+            // Inline the original function body into the new function
+            rewriter.inlineRegionBefore(funcOp.getBody(), newFuncOp.getBody(),
+                                        newFuncOp.end());
+
+            // Schedule the operations within the new function
+            if (failed(scheduleOps(newFuncOp, rewriter)))
+                return failure();
+
+            llvm::outs() << "### scheduled \n"<< newFuncOp << "\n";
+            // Erase the original function operation
+            rewriter.eraseOp(funcOp);
+
+            return success();
+        }
+    };
+
+    /**
+     * @brief Pass for scheduling TOR functions.
+     */
+    struct TORSchedulePass : public TORScheduleBase<TORSchedulePass> {
+        /**
+         * @brief Runs the pass on the operation.
+         */
+        void runOnOperation() override {
+            mlir::tor::DesignOp designOp = getOperation();
+
+            // Walk through all TOR functions within the design
+            auto result = designOp.walk([&](tor::FuncOp op) {
+                mlir::RewritePatternSet patterns(&getContext());
+                patterns.insert<FuncOpLowering>(designOp.getContext());
+
+                // Apply the rewriting patterns
+                if (failed(applyOpPatternsAndFold({op}, std::move(patterns))))
+                    WalkResult::interrupt(); // Interrupt if pattern application fails
+
+                return WalkResult::advance();
+            });
+
+            // If the walk was interrupted, signal a pass failure
+            if (result.wasInterrupted())
+                signalPassFailure();
+
+            llvm::outs() << designOp << "\n"       ;
+        }
+    };
+
+    /**
+     * @brief Factory function to create the TORSchedulePass.
+     * @return A unique pointer to the newly created pass.
+     */
+    std::unique_ptr<mlir::OperationPass<mlir::tor::DesignOp>>
+    createTORSchedulePass() {
+        return std::make_unique<TORSchedulePass>();
+    }
 
 } // namespace mlir

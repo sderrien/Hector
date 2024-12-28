@@ -7,6 +7,8 @@
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/Transforms/InliningUtils.h"
 
+#include "TOR/TORDialect.cpp.inc"
+
 
 using namespace mlir;
 using namespace mlir::tor;
@@ -18,12 +20,15 @@ struct TORInlinerInterface : public DialectInlinerInterface {
     return true;
   }
 
-  void handleTerminator(Operation *op, ArrayRef<Value> valuesToRepl) const final {
+  void handleTerminator(Operation *op, ArrayRef<Value> valuesToRepl) const {
     auto returnOp = cast<tor::ReturnOp>(op);
 
     assert(returnOp.getNumOperands() == valuesToRepl.size());
-    for (const auto &it : llvm::enumerate(returnOp.getOperands()))
-      valuesToRepl[it.index()].replaceAllUsesWith(it.value());
+    for (auto it : llvm::enumerate(returnOp.getOperands())) {
+        auto index = it.index();
+        auto value  = valuesToRepl[index];
+        value.replaceAllUsesWith(it.value());
+    }
   }
 };
 

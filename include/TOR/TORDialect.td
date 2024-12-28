@@ -6,6 +6,7 @@ include "mlir/IR/OpBase.td"
 def TORDialect : Dialect {
   let name = "tor";
   let summary = "Types and operations for tor dialect";
+    let useDefaultTypePrinterParser = 1;
   let description = [{
     This dialect defines the 'tor' dialect, which ...
   }];
@@ -13,11 +14,12 @@ def TORDialect : Dialect {
   
   let extraClassDeclaration = [{
     /// Register all RTL types.
+
     void registerTypes();
   }];
 }
 
-class TOROp<string mnemonic, list<OpTrait> traits = []> :
+class TOROp<string mnemonic, list<Trait> traits = []> :
     Op<TORDialect, mnemonic, traits>;
 
 

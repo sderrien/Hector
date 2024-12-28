@@ -13,9 +13,15 @@
 
 #include "mlir/InitAllTranslations.h"
 #include "mlir/Support/LogicalResult.h"
-#include "mlir/Translation.h"
-
+#include "mlir/Tools/mlir-translate/MlirTranslateMain.h"
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/Pass/PassManager.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Signals.h"
 int main(int argc, char **argv) {
+    // Initialize LLVM
+
   mlir::registerAllTranslations();
 
   return failed(

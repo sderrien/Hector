@@ -1,23 +1,23 @@
 #include "TOR/PassDetail.h"
-#include "mlir/Analysis/Utils.h"
+//#include "mlir/Analysis/Utils.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+//#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "TOR/TOR.h"
 #include "TOR/TORDialect.h"
 
 #include "mlir/Pass/Pass.h"
-#include "mlir/IR/BlockAndValueMapping.h"
+//#include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
 #include <mlir/Transforms/DialectConversion.h>
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/Utils.h"
+//#include "mlir/Transforms/Utils.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include <map>
@@ -518,53 +518,53 @@ namespace mlir {
                     return success();
                 }
                 timeGraphOp->dump();
-                START = timeGraphOp.starttime();
-                END = timeGraphOp.endtime();
+                START = timeGraphOp.getStarttime();
+                END = timeGraphOp.getEndtime();
                 MAX_INDEX = std::max(START, END);
-                for (auto &block : timeGraphOp.region()) {
+                for (auto &block : timeGraphOp.getRegion()) {
                     for (auto &op : block) {
                         if (auto start = dyn_cast<tor::StartTimeOp>(op)) {
-                            MAX_INDEX = std::max(MAX_INDEX, start.starttime());
+                            MAX_INDEX = std::max(MAX_INDEX, start.getStarttime());
                         } else if (auto end = dyn_cast<tor::EndTimeOp>(op)) {
-                            MAX_INDEX = std::max(MAX_INDEX, end.endtime());
+                            MAX_INDEX = std::max(MAX_INDEX, end.getEndtime());
                         } else if (auto succ = dyn_cast<tor::SuccTimeOp>(op)) {
                             //                        succ.dump();
                             //                        succ.edges().dump();
                             //                        std::cerr << succ.time() << std::endl;
                             //                        succ.points().dump();
-                            MAX_INDEX = std::max(MAX_INDEX, succ.time());
-                            for (unsigned i = 0; i < succ.points().size(); i++) {
-                                auto from = succ.points()[i];
-                                auto comp_edge = succ.edges()[i].cast<DictionaryAttr>();
+                            MAX_INDEX = std::max(MAX_INDEX, succ.getTime());
+                            for (unsigned i = 0; i < succ.getPoints().size(); i++) {
+                                auto from = succ.getPoints()[i];
+                                auto comp_edge = succ.getEdges()[i].cast<DictionaryAttr>();
                                 auto edge = comp_edge.get("format");
                                 int index = from.cast<IntegerAttr>().getInt();
                                 auto info = edge.cast<StringAttr>().getValue().str();
                                 if (info.find("static:") != StringRef::npos) {
                                     timeGraph[index].push_back(
-                                            TimeEdge(succ.time(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
+                                            TimeEdge(succ.getTime(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
                                                      false, std::stoi(info.substr(7))));
                                 } else if (edge.cast<StringAttr>().getValue() == "static-while+pipeline") {
                                     timeGraph[index].push_back(
-                                            TimeEdge(succ.time(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
+                                            TimeEdge(succ.getTime(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
                                                      true, 0, true));
                                 } else if (edge.cast<StringAttr>().getValue() == "static-for+pipeline") {
                                     timeGraph[index].push_back(
-                                            TimeEdge(succ.time(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
+                                            TimeEdge(succ.getTime(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
                                                      true, 0, true));
                                 } else if (edge.cast<StringAttr>().getValue() == "static-while") {
                                     timeGraph[index].push_back(
-                                            TimeEdge(succ.time(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
+                                            TimeEdge(succ.getTime(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
                                                      true, 0, false));
                                 } else if (edge.cast<StringAttr>().getValue() == "static-for") {
                                     timeGraph[index].push_back(
-                                            TimeEdge(succ.time(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
+                                            TimeEdge(succ.getTime(), comp_edge.get("times").cast<IntegerAttr>().getInt(),
                                                      true, 0, false));
                                 } else {
                                     edge.dump();
                                     assert("Unexpected edge attribute" && false);
                                 }
-                                std::cerr << "???" << succ.time() << std::endl;
-                                succOp[succ.time()] = &op;
+                                std::cerr << "???" << succ.getTime() << std::endl;
+                                succOp[succ.getTime()] = &op;
                             }
                         }
                     }
@@ -572,7 +572,7 @@ namespace mlir {
                 funcOp.walk([&](Operation *op) {
 #define BIND(OpType)                   \
 if (auto sop = dyn_cast<OpType>(op)) \
-bind_operation(sop.starttime(), sop.endtime(), op);
+bind_operation(sop.getStarttime(), sop.getEndtime(), op);
                     BIND(tor::AddIOp)
                     BIND(tor::SubIOp)
                     BIND(tor::MulIOp)
@@ -583,7 +583,7 @@ bind_operation(sop.starttime(), sop.endtime(), op);
                     BIND(tor::CmpFOp)
 #undef BIND
                     if (auto ifOp = dyn_cast<tor::IfOp>(op)) {
-                        ifEnd[ifOp.starttime()] = ifOp.endtime();
+                        ifEnd[ifOp.getStarttime()] = ifOp.getEndtime();
                     } else if (auto whileOp = dyn_cast<tor::WhileOp>(op)) {
                     } else if (auto forOp = dyn_cast<tor::ForOp>(op)) {
                     }
@@ -613,26 +613,26 @@ bind_operation(sop.starttime(), sop.endtime(), op);
                         if (!edge.Static) {
                             auto succ = cast<tor::SuccTimeOp>(succOp[edge.to]);
                             std::vector<Attribute> edge_array;
-                            for (size_t j = 0; j < succ.points().size(); j++) {
-                                if (succ.points()[j].cast<IntegerAttr>().getInt() == i) {
+                            for (size_t j = 0; j < succ.getPoints().size(); j++) {
+                                if (succ.getPoints()[j].cast<IntegerAttr>().getInt() == i) {
                                     std::vector<NamedAttribute> dict;
-                                    for (auto entry : succ.edgesAttr()[j].cast<DictionaryAttr>()) {
-                                        if (entry.first.str() != "format") {
+                                    for (auto entry : succ.getEdgesAttr()[j].cast<DictionaryAttr>()) {
+                                        if (entry.getName().str() != "format") {
                                             dict.push_back(entry);
                                         } else {
                                             dict.push_back(
-                                                    NamedAttribute(entry.first,
+                                                    NamedAttribute(entry.getName(),
                                                                    StringAttr::get(getContext(), "dynamic")));
                                         }
                                     }
                                     auto new_dict = DictionaryAttr::get(getContext(), dict);
                                     edge_array.push_back(new_dict);
                                 } else {
-                                    edge_array.push_back(succ.edges()[j]);
+                                    edge_array.push_back(succ.getEdges()[j]);
                                 }
                             }
                             auto array = ArrayAttr::get(getContext(), edge_array);
-                            succ.edgesAttr(array);
+                            succ.setEdgesAttr(array);
                         }
                     }
                 }
@@ -650,7 +650,7 @@ bind_operation(sop.starttime(), sop.endtime(), op);
                         mlir::RewritePatternSet patterns(&getContext());
                         patterns.insert<partition::SchedulePartition>(op.getContext());
 
-                        if (failed(applyOpPatternsAndFold(op, std::move(patterns))))
+                        if (failed(applyOpPatternsAndFold({op}, std::move(patterns))))
                             return WalkResult::advance();
 //                        applyOpPatternsAndFold(op, std::move(patterns));
 

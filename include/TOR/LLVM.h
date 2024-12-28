@@ -95,7 +95,7 @@ struct OpRewritePattern;
 
 using DefaultTypeStorage = TypeStorage;
 using OpAsmSetValueNameFn = function_ref<void(Value, StringRef)>;
-using NamedAttribute = std::pair<Identifier, Attribute>;
+//using NamedAttribute = std::pair<Identifier, Attribute>;
 
 namespace OpTrait {}
 

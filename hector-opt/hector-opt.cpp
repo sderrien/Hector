@@ -1,8 +1,10 @@
 
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/IR/BuiltinDialect.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+//#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/InitAllDialects.h"
@@ -10,32 +12,36 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
-#include "mlir/Support/MlirOptMain.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 
+#include "mlir/tools/mlir-opt/MlirOptMain.h"
+
+#include "TOR/TOR.h"
 #include "TOR/TORDialect.h"
 #include "TOR/Passes.h"
 #include "HEC/HECDialect.h"
 #include "HEC/Passes.h"
+
 
 int main(int argc, char **argv) {
   // TODO: Register codesign passes here.
   mlir::registerAllPasses();
 
   mlir::DialectRegistry registry;
-  registry.insert<mlir::AffineDialect>();
+    registry.insert<mlir::arith::ArithDialect>();
+    registry.insert<mlir::affine::AffineDialect>();
   registry.insert<mlir::LLVM::LLVMDialect>();
   registry.insert<mlir::memref::MemRefDialect>();
-  registry.insert<mlir::StandardOpsDialect>();
+  registry.insert<mlir::BuiltinDialect>();
   registry.insert<mlir::scf::SCFDialect>();
   registry.insert<mlir::tor::TORDialect>();
-  registry.insert<mlir::hec::HECDialect>();
+//  registry.insert<mlir::hec::HECDialect>();
 
   mlir::registerTORPasses();
-  mlir::registerHECPasses();
+//  mlir::registerHECPasses();
   // Add the following to include *all* MLIR Core dialects, or selectively
   // include what you need like above. You only need to register dialects that
   // will be *parsed* by the tool, not the one generated

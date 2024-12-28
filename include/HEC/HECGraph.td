@@ -21,7 +21,8 @@ def GraphOp : HECOp<"graph", [
 
   }];
   let assemblyFormat = "$body attr-dict";
-  let verifier = "return ::verify$cppClass(*this);";
+  let hasVerifier=1;
+  //let verifier = "return ::verify$cppClass(*this);";
 }
 
 #endif // HEC_GRAPH_TD

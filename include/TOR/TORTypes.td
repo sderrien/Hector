@@ -36,6 +36,7 @@ def TOR_MemRef : TOR_Type<"MemRef", "mlir::tor::BaseMemRefType"> {
   }];
   
   let mnemonic = "memref";
+  let hasCustomAssemblyFormat=1;
   let parameters = (ins
     ArrayRefParameter<"int64_t"> : $shape,
     "Type" : $elementType,

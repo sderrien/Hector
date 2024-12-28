@@ -288,8 +288,8 @@ namespace mlir
   namespace tor
   {
 
-    ::mlir::Type MemRefType::parse(::mlir::MLIRContext *context,
-                                   ::mlir::DialectAsmParser &parser)
+
+      ::mlir::Type MemRefType::parse(::mlir::AsmParser &parser)
     {
       SmallVector<int64_t, 2> dims;
       SmallVector<mlir::StringAttr, 2> properties;
@@ -359,10 +359,11 @@ namespace mlir
       return success();
     }
 
-    void MemRefType::print(::mlir::DialectAsmPrinter &printer) const
+      void  MemRefType::print(::mlir::AsmPrinter &printer) const
     {
       printer << "memref<";
-      auto shape = getShape();
+
+     auto shape = getShape();
       printer << shape[0];
       for (auto dim : shape.drop_front())
       {
@@ -381,6 +382,8 @@ namespace mlir
       }
       printer << "], \"" << getRw().getValue() << "\""
               << ">";
+
+
     }
 
   } // end tor
@@ -398,16 +401,16 @@ namespace mlir
 #include "TOR/TORTypes.cpp.inc"
           >();
     }
-
+#ifdef CUSTOM_PARSE
     /// Parses a type registered to this dialect. Parse out the mnemonic then invoke
     /// the tblgen'd type parser dispatcher.
-    Type TORDialect::parseType(DialectAsmParser &parser) const
+    Type TORDialect::parseType(::mlir::DialectAsmParser &parser) const
     {
       llvm::StringRef mnemonic;
       if (parser.parseKeyword(&mnemonic))
         return Type();
       Type type;
-      auto parseResult = generatedTypeParser(getContext(), parser, mnemonic, type);
+      auto parseResult = generatedTypeParser(parser, mnemonic, type);
       if (parseResult.hasValue())
         return type;
       return Type();
@@ -421,7 +424,7 @@ namespace mlir
         return;
       llvm_unreachable("unexpected 'tor' type");
     }
-
+#endif
     namespace detail
     {
 

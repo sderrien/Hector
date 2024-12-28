@@ -1,5 +1,7 @@
 # HECTOR: A Multi-level Intermediate Representation for Hardware Synthesis Methodologies
 
+This is a fork of the Hector Project refactored to compile with recent MLIR version (2023). 
+
 ## Introduction
 Hardware synthesis requires a complicated process to generate synthesizable register transfer level (RTL) code. High-level synthesis tools can automatically transform a high-level description into hardware design, while hardware generators adopt domain specific languages and synthesis flows for specific applications. The implementation of these tools generally requires substantial engineering efforts due to RTL’s weak expressivity and low level of abstraction. Furthermore, different synthesis tools adopt different levels of intermediate representations (IR) and transformations. A unified IR obviously is a good way to lower the engineering cost and get competitive hardware design rapidly by exploring different synthesis methodologies.
 
@@ -7,9 +9,9 @@ This project proposes Hector, a two-level IR providing a unified intermediate re
 
 ## Installation
 1. Install LLVM/MLIR according to https://mlir.llvm.org/getting_started/
-We use the commit 1c10201d9660c1d6f43a7226ca7381bfa255105d
+We use the commit 0ce01712432dd34f7e83f78af23fb444f3fd92b6
 ```sh
-git checkout 1c10201d9660c1d6f43a7226ca7381bfa255105d
+git checkout 0ce01712432dd34f7e83f78af23fb444f3fd92b6
 ```
 
 2. Clone the project

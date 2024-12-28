@@ -1,3 +1,18 @@
+include "mlir/Dialect/MLProgram/IR/MLProgramBase.td"
+include "mlir/Dialect/MLProgram/IR/MLProgramAttributes.td"
+include "mlir/Dialect/MLProgram/IR/MLProgramTypes.td"
+include "mlir/Interfaces/CallInterfaces.td"
+include "mlir/Interfaces/ControlFlowInterfaces.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
+include "mlir/IR/OpAsmInterface.td"
+include "mlir/IR/RegionKindInterface.td"
+include "mlir/IR/SymbolInterfaces.td"
+
+ include "mlir/IR/OpBase.td"
+ include "mlir/IR/BuiltinTypes.td"
+ include "mlir/IR/SymbolInterfaces.td"
+ include "mlir/Interfaces/CallInterfaces.td"
 
 def NotOp : HECOp<"not",[]> {
   let summary = "HEC Not";

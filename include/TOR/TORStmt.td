@@ -1,4 +1,20 @@
-def TimeGraphOp : TOROp<"timegraph", [HasParent<"FuncOp">, 
+include "mlir/Dialect/MLProgram/IR/MLProgramBase.td"
+include "mlir/Dialect/MLProgram/IR/MLProgramAttributes.td"
+include "mlir/Dialect/MLProgram/IR/MLProgramTypes.td"
+include "mlir/Interfaces/CallInterfaces.td"
+include "mlir/Interfaces/ControlFlowInterfaces.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
+include "mlir/IR/OpAsmInterface.td"
+include "mlir/IR/RegionKindInterface.td"
+include "mlir/IR/SymbolInterfaces.td"
+
+ include "mlir/IR/OpBase.td"
+ include "mlir/IR/BuiltinTypes.td"
+ include "mlir/IR/SymbolInterfaces.td"
+ include "mlir/Interfaces/CallInterfaces.td"
+
+def TimeGraphOp : TOROp<"timegraph", [HasParent<"FuncOp">,
                                        SingleBlockImplicitTerminator<"tor::FinishOp">
                                       /*SingleBlock, NoTerminator*/]> {
   let summary = "bulid time-graph operation";
@@ -16,9 +32,10 @@ def TimeGraphOp : TOROp<"timegraph", [HasParent<"FuncOp">,
                        I32Attr : $endtime);
   let regions = (region SizedRegion<1> : $region);
 
-  let printer = "return ::print(p, *this);";
-  let parser = "return ::parse$cppClass(parser, result);";
-  let verifier = ?;
+  let hasCustomAssemblyFormat=true;
+  // let printer = "return ::print(p, *this);";
+  // let parser = "return ::parse$cppClass(parser, result);";
+  // let verifier = ?;
 }
 
 def FinishOp : TOROp<"finish", [Terminator]> {
@@ -27,7 +44,7 @@ def FinishOp : TOROp<"finish", [Terminator]> {
     The 'tor.finish' operation serves as the terminator of a time graph.
   }];
   let assemblyFormat = "attr-dict";
-  let verifier = ?;
+  // let verifier = ?;
 }
 
 def StartTimeOp : TOROp<"starttime", [/*HasParent<"FuncOp">*/]> {
@@ -42,7 +59,7 @@ def StartTimeOp : TOROp<"starttime", [/*HasParent<"FuncOp">*/]> {
   let arguments = (ins I32Attr : $starttime);
 
   let assemblyFormat = "$starttime attr-dict";
-  let verifier = "return ::verify$cppClass(*this);";
+  // let verifier = "return ::verify$cppClass(*this);";
 }
 
 def EndTimeOp : TOROp<"endtime", [/*HasParent<"FuncOp">,*/Terminator]> {
@@ -59,7 +76,7 @@ def EndTimeOp : TOROp<"endtime", [/*HasParent<"FuncOp">,*/Terminator]> {
 
   let assemblyFormat = "$endtime attr-dict";
 
-  let verifier = "return ::verify$cppClass(*this);";
+  // let verifier = "return ::verify$cppClass(*this);";
 }
 
 
@@ -78,12 +95,12 @@ def SuccTimeOp : TOROp<"succ", [HasParent<"TimeGraphOp">]> {
                        ArrayAttr : $edges);
 
   let assemblyFormat = [{$time `:` $points $edges attr-dict}];
-  let verifier = "return ::verify$cppClass(*this);";
+  // let verifier = "return ::verify$cppClass(*this);";
 }
 
 def IfOp : TOROp<"if", [/*DeclareOpInterfaceMethods<RegionBranchOpInterface>,*/
                          SingleBlockImplicitTerminator<"tor::YieldOp">,
-                         RecursiveSideEffects, 
+                         RecursiveMemoryEffects, 
                          NoRegionArguments]> {
   let summary = "if-then-else operation";
 
@@ -106,13 +123,15 @@ def IfOp : TOROp<"if", [/*DeclareOpInterfaceMethods<RegionBranchOpInterface>,*/
   let results = (outs Variadic<AnyType> : $results);
   let regions = (region SizedRegion<1> : $thenRegion, AnyRegion : $elseRegion);
 
-  let printer = "return ::print(p, *this);";
-  let parser = "return ::parse$cppClass(parser, result);";
-  let verifier = "return ::verify$cppClass(*this);";
+  let hasCustomAssemblyFormat=true;
+
+  // let printer = "return ::print(p, *this);";
+  // let parser = "return ::parse$cppClass(parser, result);";
+  // let verifier = "return ::verify$cppClass(*this);";
 }
 
 def ForOp : TOROp<"for", [SingleBlockImplicitTerminator<"tor::YieldOp">,
-                           RecursiveSideEffects]> {
+                           RecursiveMemoryEffects]> {
   let summary = "for operation";
   let description = [{
     The "tor.for" operation represents a loop take 3 SSA value as operands
@@ -161,14 +180,16 @@ def ForOp : TOROp<"for", [SingleBlockImplicitTerminator<"tor::YieldOp">,
   let builders = [
     OpBuilder<(ins "Value" : $lowerBound, "Value" : $upperBound, "Value" : $step,
       "IntegerAttr" : $starttime, "IntegerAttr" : $endtime,
-      CArg<"ValueRange", "llvm::None"> : $initArgs,
+      CArg<"ValueRange"> : $initArgs,
       CArg<"function_ref<void(OpBuilder &, Location, Value, ValueRange)>", 
         "nullptr">)>
   ];
   
-  let printer = "return ::print(p, *this);";
-  let parser = "return ::parse$cppClass(parser, result);";
-  let verifier = "return ::verify$cppClass(*this);";
+  let hasCustomAssemblyFormat=true;
+ 
+  // let printer = "return ::print(p, *this);";
+  // let parser = "return ::parse$cppClass(parser, result);";
+  // let verifier = "return ::verify$cppClass(*this);";
 
   let extraClassDeclaration = [{
     using BodyBuilderFn = function_ref<void(OpBuilder &, Location, Value, ValueRange)>;
@@ -193,7 +214,7 @@ def ForOp : TOROp<"for", [SingleBlockImplicitTerminator<"tor::YieldOp">,
 
 def WhileOp : TOROp<"while", 
     [/*DeclareOpInterfaceMethods<RegionBranchOpInterface>,*/
-     RecursiveSideEffects]> {
+     RecursiveMemoryEffects]> {
   let summary = "while operation"; 
   let description = [{
     The "tor.while" operation represents a general loop structure;
@@ -215,14 +236,16 @@ def WhileOp : TOROp<"while",
   let results = (outs Variadic<AnyType> : $results);
   let regions = (region SizedRegion<1> : $before, SizedRegion<1> : $after);
 
-  let printer = "return ::print(p, *this);";
-  let parser = "return ::parse$cppClass(parser, result);";
-  let verifier = "return ::verify$cppClass(*this);";
+  let hasCustomAssemblyFormat=true;
+    let hasVerifier = 1;
+  //let printer = "return ::print(p, *this);";
+  // let parser = "return ::parse$cppClass(parser, result);";
+  // let verifier = "return ::verify$cppClass(*this);";
 }
 
 
 def ConditionOp : TOROp<"condition",
-                         [HasParent<"WhileOp">, NoSideEffect, Terminator]> {
+                         [HasParent<"WhileOp">, Pure, Terminator]> {
   let summary = "loop continuation condition";
   let description = [{
     This operation accepts the continuation (i.e., inverse of exit) condition
@@ -236,10 +259,10 @@ def ConditionOp : TOROp<"condition",
   let assemblyFormat =
       [{ `(` $condition `)` attr-dict ($args^ `:` type($args))? }];
 
-  let verifier = ?;
+//  let verifier = ?;
 }
 
-def YieldOp : TOROp<"yield", [NoSideEffect, ReturnLike, Terminator, 
+def YieldOp : TOROp<"yield", [Pure, ReturnLike, Terminator, 
                                ParentOneOf<["IfOp", "WhileOp", "ForOp"]>]> {
   let summary = "yield operation";
   let description = [{
@@ -250,7 +273,7 @@ def YieldOp : TOROp<"yield", [NoSideEffect, ReturnLike, Terminator,
 
   let builders = [OpBuilder<(ins), [{ /* nothing to do */ }]>];
   let assemblyFormat = "attr-dict ($results^ `:` type($results))?";
-  let verifier = ?;  
+  // let verifier = ?;  
 }
 
 
@@ -270,20 +293,15 @@ def DesignOp : TOROp<"design", [
   let regions = (region SizedRegion<1>: $body);
 
   let extraClassDeclaration = [{
-    // return the body of a tor design.
-    Block *getBody() {
-      return &getOperation()->getRegion(0).front();
-    }
-    
   }];
 
   let assemblyFormat = "$symbol $body attr-dict";
-  let verifier = "return ::verify$cppClass(*this);";
+  //let verifier = "return ::verify$cppClass(*this);";
 }
 
 def FuncOp: TOROp<"func", [
-    /*IsolatedFromAbove, */FunctionLike, Symbol, RegionKindInterface, 
-    CallableOpInterface,
+    /*IsolatedFromAbove, */ Symbol, RegionKindInterface,
+    CallableOpInterface,FunctionOpInterface,
     HasParent<"DesignOp">
     /*,
        SingleBlockImplicitTerminator<"ReturnOp">, HasParent<"DesignOp">*/]>{
@@ -295,7 +313,12 @@ def FuncOp: TOROp<"func", [
     it has some extra verification conditions, such as 'each value must only
     have a single use'.
   }];
-  let arguments = (ins);
+  let arguments = (ins TypeAttrOf<FunctionType>:$function_type, FlatSymbolRefAttr:$name,
+
+   OptionalAttr<DictArrayAttr>:$arg_attrs,
+                         OptionalAttr<DictArrayAttr>:$res_attrs);
+
+
   let results = (outs);
   let regions = (region SizedRegion<1>:$body);
 
@@ -306,68 +329,39 @@ def FuncOp: TOROp<"func", [
                    CArg<"ArrayRef<NamedAttrList>", "{}">:$argAttrs)>
   ];
 
-  let printer = "return ::print(p, *this);";
-  let parser = "return ::parse$cppClass(parser, result);";
-  let verifier = "return ::verify$cppClass(*this);";
-
+  let hasCustomAssemblyFormat = 1;
+ let hasVerifier = 1;
   let extraClassDeclaration = [{
-    using FunctionLike::front;
-    using FunctionLike::getBody;
+       //===------------------------------------------------------------------===//
+       // FunctionOpInterface Methods
+       //===------------------------------------------------------------------===//
 
-    static RegionKind getRegionKind(unsigned index) { 
-      return RegionKind::SSACFG;
-    }
-    
-    Block *getBodyBlock() { return &body().front();}
-    
-    StringAttr getNameAttr() {
-      return (*this)->getAttrOfType<StringAttr>(
-        ::mlir::SymbolTable::getSymbolAttrName());
-    }
-
-    StringRef getName() {
-      return getNameAttr().getValue();
-    }
-
-    FunctionType getType() {
-      return (*this)->getAttrOfType<TypeAttr>(getTypeAttrName())
-          .getValue()
-          .cast<FunctionType>();
-    }
-
-    Region *getCallableRegion() {
-      return isExternal() ? nullptr : &getBody();
-    }
-
-    ArrayRef<Type> getCallableResults() {
-      return getType().getResults();
-    }
-
-    // This trait needs access to the hooks defined below.
-    friend class OpTrait::FunctionLike<FuncOp>;
-
-    /// Returns the number of arguments, implementing OpTrait::FunctionLike.
-    unsigned getNumFuncArguments() { return getType().getInputs().size(); }
-    /// Returns the number of results, implementing OpTrait::FunctionLike.
-    unsigned getNumFuncResults() { return getType().getResults().size(); }
-
-    /// Hook for OpTrait::FunctionLike, called after verifying that the 'type'
-    /// attribute is present and checks if it holds a function type.  Ensures
-    /// getType, getNumFuncArguments, and getNumFuncResults can be called
-    ///  safely.
-    LogicalResult verifyType() {
-      auto type = getTypeAttr().getValue();
-      if (!type.isa<FunctionType>())
-        return emitOpError("requires '" + getTypeAttrName() +
-                           "' attribute of function type");
-      return success();
-    }
-  }];
+       /// Returns the region on the current operation that is callable. This may
+       /// return null in the case of an external callable object, e.g. an external
+       /// function.
+       ::mlir::Region *getCallableRegion() {
+         return isExternal() ? nullptr : &getBody();
+       }
+       /// Returns the argument types of this function.
+       ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
+       /// Returns the result types of this function.
+       ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
+       //===------------------------------------------------------------------===//
+       // RegionKindInterface Methods
+       //===------------------------------------------------------------------===//
+       static ::mlir::RegionKind getRegionKind(unsigned index) {
+         return ::mlir::RegionKind::SSACFG;
+       }
+       //===------------------------------------------------------------------===//
+       // SymbolOpInterface Methods
+       //===------------------------------------------------------------------===//
+       bool isDeclaration() { return isExternal(); }
+ }];
 
 }
 
 def ReturnOp : TOROp<"return", [Terminator, ParentOneOf<["FuncOp"/*, "ModuleOp"*/]>,
-                               NoSideEffect, ReturnLike]> {
+                               Pure, ReturnLike]> {
   let summary = "tor func terminator return";
   let description = [{
     The "tor.return" operation represents the termination of a TOR func.
@@ -375,14 +369,13 @@ def ReturnOp : TOROp<"return", [Terminator, ParentOneOf<["FuncOp"/*, "ModuleOp"*
 
   let arguments = (ins Variadic<AnyType> : $operands/*,
                        I32Attr : $time*/);
-  
-  let printer = "return ::print(p, *this);";
-  let parser = "return ::parse$cppClass(parser, result);";
-  let verifier = "return ::verify$cppClass(*this);";
+  let hasCustomAssemblyFormat=1;
+  // let printer = "return ::print(p, *this);";
+  // let parser = "return ::parse$cppClass(parser, result);";
+   let hasVerifier = 1;
 }
 
-def CallOp : TOROp<"call", [CallOpInterface/*,
-    DeclareOpInterfaceMethods<SymbolUserOpInterface>*/]> {
+def CallOp : TOROp<"call", [CallOpInterface,SymbolUserOpInterface]> {
   let summary = "tor call operation";
   let description = [{
     The "tor.call" operation represents a direct call to a tor.func
@@ -396,10 +389,26 @@ def CallOp : TOROp<"call", [CallOpInterface/*,
   let results = (outs Variadic<AnyType>);
 
   let extraClassDeclaration = [{
-    StringRef getCallee() { return callee(); }
     FunctionType getCalleeType();
+      /// Get the argument operands to the called function.
 
-    /// Get the argument operands to the called function.
+    MutableOperandRange getArgOperandsMutable() {
+        MutableOperandRange range(this->getOperation()) ;
+        return range;
+      }
+
+    // Sets the callee from the callable
+    void setCalleeFromCallable(::mlir::CallInterfaceCallable callee) {
+    }
+
+    // Lookup a symbol referenced by MyCallOp
+    LogicalResult verifySymbolUses(::mlir::SymbolTableCollection &symbolTable);
+
+    /// Return the callee of this operation.
+    CallInterfaceCallable getCallableForCallee() {
+      return (*this)->getAttrOfType<SymbolRefAttr>("callee");
+    }
+
     operand_range getArgOperands() {
       return {arg_operand_begin(), arg_operand_end()};
     }
@@ -407,15 +416,11 @@ def CallOp : TOROp<"call", [CallOpInterface/*,
     operand_iterator arg_operand_begin() { return operand_begin(); }
     operand_iterator arg_operand_end() { return operand_end(); }
 
-    /// Return the callee of this operation.
-    CallInterfaceCallable getCallableForCallee() {
-      return (*this)->getAttrOfType<SymbolRefAttr>("callee");
-    }
   }];
 
   let assemblyFormat = [{
     $callee `(` $operands `)` `on` ` ` `(` $starttime `to` $endtime `)` attr-dict 
     `:` functional-type($operands, results)
   }];
-  let verifier = ?;
+  let hasVerifier = 1;
 }

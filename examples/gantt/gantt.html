@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Gantt Chart with Dependencies</title>
+    <!-- Frappe Gantt CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/frappe-gantt/dist/frappe-gantt.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #gantt {
+            width: 100%;
+            height: 500px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Project Schedule</h1>
+<div id="gantt"></div>
+
+<!-- Frappe Gantt JS -->
+<script src="https://unpkg.com/frappe-gantt/dist/frappe-gantt.min.js"></script>
+<script>
+    // Define your tasks with dependencies
+    const tasks = [
+        {
+            id: 'Task 1',
+            name: 'Design Phase',
+            start: '2024-01-01',
+            end: '2024-01-15',
+            progress: 100,
+            dependencies: ''
+        },
+        {
+            id: 'Task 2',
+            name: 'Development Phase',
+            start: '2024-01-16',
+            end: '2024-02-28',
+            progress: 50,
+            dependencies: 'Task 1'
+        },
+        {
+            id: 'Task 3',
+            name: 'Testing Phase',
+            start: '2024-03-01',
+            end: '2024-03-15',
+            progress: 0,
+            dependencies: 'Task 2'
+        },
+        {
+            id: 'Task 4',
+            name: 'Deployment',
+            start: '2024-03-16',
+            end: '2024-03-20',
+            progress: 0,
+            dependencies: 'Task 3'
+        },
+        {
+            id: 'Task 5',
+            name: 'Documentation',
+            start: '2024-01-20',
+            end: '2024-02-10',
+            progress: 75,
+            dependencies: 'Task 1'
+        }
+    ];
+
+    // Initialize the Gantt chart
+    const gantt = new Gantt("#gantt", tasks, {
+        // Optional configurations
+        view_mode: 'Day', // Other options: 'Week', 'Month', 'Year'
+        language: 'en',    // Language settings
+        custom_popup_html: function(task) {
+            return `
+                    <div class="details-container">
+                        <h5>${task.name}</h5>
+                        <p><strong>Start:</strong> ${task.start}</p>
+                        <p><strong>End:</strong> ${task.end}</p>
+                        <p><strong>Progress:</strong> ${task.progress}%</p>
+                        <p><strong>Dependencies:</strong> ${task.dependencies || 'None'}</p>
+                    </div>
+                `;
+        }
+    });
+</script>
+</body>
+</html>

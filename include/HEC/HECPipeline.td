@@ -22,7 +22,8 @@ def StageSetOp : HECOp<"stageset", [
   }];
 
   let assemblyFormat = "$body attr-dict";
-  let verifier = "return ::verify$cppClass(*this);";
+  let hasVerifier=1;
+  //let verifier = "return ::verify$cppClass(*this);";
 }
 
 def StageOp : HECOp<"stage", [
@@ -41,9 +42,11 @@ def StageOp : HECOp<"stage", [
   ];
   let regions = (region SizedRegion<1>: $body);
   
-  let printer = "return ::print$cppClass(p, *this);";
-  let parser = "return ::parse$cppClass(parser, result);";
-  let verifier = "return ::verify$cppClass(*this);";
+  let hasVerifier=1;
+  let hasCustomAssemblyFormat=1;
+  // let printer = "return ::print$cppClass(p, *this);";
+  // let parser = "return ::parse$cppClass(parser, result);";  
+  // let verifier = "return ::verify$cppClass(*this);";
 }
 
 def InitOp : HECOp<"init", []> {
@@ -58,7 +61,7 @@ def InitOp : HECOp<"init", []> {
   );
 
   let assemblyFormat = "$dst `=` $src attr-dict `:` type($src) `->` type($dst)";
-  let verifier = ?;
+  //let verifier = ?;
 }
 
 def YieldOp : HECOp<"yield",[]> {
@@ -68,7 +71,7 @@ def YieldOp : HECOp<"yield",[]> {
   }];
   let arguments = (ins Variadic<AnyType> : $results);
   let assemblyFormat = "attr-dict ($results^ `:` type($results))?";
-  let verifier = ?;
+  //let verifier = ?;
 }
 
 
@@ -84,7 +87,7 @@ def DeliverOp : HECOp<"deliver",[]> {
     Optional<I1>: $guard);
 
   let assemblyFormat = "$src `to` $destReg `(` $destPort `)` attr-dict  (`if` $guard^)?`:` type($src) `->` type($destReg) `,` type($destPort)";
-  let verifier = ?;
+  //let verifier = ?;
 }
 
 #endif // HEC_PIPELINE_TD

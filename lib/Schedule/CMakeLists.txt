@@ -3,6 +3,8 @@ add_mlir_dialect_library(TORSCHEDULE
     SDCSolver.cpp
     SDCSchedule.cpp
     CDFG.cpp
+        DisjointSet.cpp
+        TimeGraph.cpp
     
     ADDITIONAL_HEADER_DIRS
     ${PROJECT_SOURCE_DIR}/include/TOR

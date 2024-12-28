@@ -1,23 +1,23 @@
 #include "TOR/PassDetail.h"
-#include "mlir/Analysis/Utils.h"
+//#include "mlir/Analysis/Utils.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+//#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "TOR/TOR.h"
 #include "TOR/TORDialect.h"
 
 #include "mlir/Pass/Pass.h"
-#include "mlir/IR/BlockAndValueMapping.h"
+//#include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
 #include <mlir/Transforms/DialectConversion.h>
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/Utils.h"
+//#include "mlir/Transforms/Utils.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include <map>
@@ -155,7 +155,7 @@ namespace mlir {
             for (auto val : op->getOperands()) {
                 if (!val.isa<BlockArgument>()) {
                     auto sop = val.getDefiningOp();
-                    if (isa<ConstantOp, tor::AllocOp>(sop)) {
+                    if (isa<arith::ConstantOp, tor::AllocOp>(sop)) {
                         continue;
                     }
                     if (std::find(ops.begin(), ops.end(), sop) != ops.end()) {
@@ -183,7 +183,7 @@ namespace mlir {
         }
 
         bool check(Operation *op, int time_node) {
-            if (!op || isa<ConstantOp>(op) || isa<tor::AllocOp>(op))
+            if (!op || isa<arith::ConstantOp>(op) || isa<tor::AllocOp>(op))
                 return true;
             if (beginNode.find(op) == beginNode.end()) {
                 std::cerr << "NOT FOUND: ";
@@ -197,13 +197,13 @@ namespace mlir {
         }
 
         bool check_dependence(Operation *op) {
-            if (!op || isa<ConstantOp>(op))
+            if (!op || isa<arith::ConstantOp>(op))
                 return true;
             op->dump();
 
             if (beginNode.find(op) != beginNode.end()) {
                 for (auto val : op->getOperands()) {
-                    if (!val.isa<BlockArgument>() && !isa<ConstantOp>(val.getDefiningOp())) {
+                    if (!val.isa<BlockArgument>() && !isa<arith::ConstantOp>(val.getDefiningOp())) {
                         if (!check(val.getDefiningOp(), beginNode[op])) {
                             return false;
                         }
@@ -246,17 +246,17 @@ namespace mlir {
                 }
             }
 //            timeGraphOp->dump();
-            START = timeGraphOp.starttime();
-            END = timeGraphOp.endtime();
+            START = timeGraphOp.getStarttime();
+            END = timeGraphOp.getEndtime();
             MAX_INDEX = std::max(START, END);
-            for (auto &block : timeGraphOp.region()) {
+            for (auto &block : timeGraphOp.getRegion()) {
                 for (auto &op : block) {
 //                    op.dump();
                     if (auto succ = dyn_cast<tor::SuccTimeOp>(op)) {
-                        MAX_INDEX = std::max(MAX_INDEX, succ.time());
-                        for (unsigned i = 0; i < succ.points().size(); i++) {
-                            auto from = succ.points()[i];
-                            auto comp_edge = succ.edges()[i].cast<DictionaryAttr>();
+                        MAX_INDEX = std::max(MAX_INDEX, succ.getTime());
+                        for (unsigned i = 0; i < succ.getPoints().size(); i++) {
+                            auto from = succ.getPoints()[i];
+                            auto comp_edge = succ.getEdges()[i].cast<DictionaryAttr>();
                             bool pipeline = comp_edge.get("pipeline").operator bool();
                             if (pipeline) {
 //                                succ->dump();
@@ -266,19 +266,19 @@ namespace mlir {
                             auto info = edge_info.cast<StringAttr>().getValue().str();
                             if (info.find("dynamic") != StringRef::npos) {
                                 timeGraph[index].push_back(
-                                        TimeEdge(index, succ.time(), succ.edges()[i], false,
+                                        TimeEdge(index, succ.getTime(), succ.getEdges()[i], false,
                                                  info.find("for") != StringRef::npos ||
                                                  info.find("while") != StringRef::npos, pipeline));
                             } else if (info.find("static") != StringRef::npos) {
                                 if (info.find("static:") != StringRef::npos) {
                                     timeGraph[index].push_back(
-                                            TimeEdge(index, succ.time(), succ.edges()[i], true,
+                                            TimeEdge(index, succ.getTime(), succ.getEdges()[i], true,
                                                      info.find("for") != StringRef::npos ||
                                                      info.find("while") != StringRef::npos, pipeline,
                                                      std::atoi(info.substr(info.find("static:") + 7).c_str())));
                                 } else {
                                     timeGraph[index].push_back(
-                                            TimeEdge(index, succ.time(), succ.edges()[i], true,
+                                            TimeEdge(index, succ.getTime(), succ.getEdges()[i], true,
                                                      info.find("for") != StringRef::npos ||
                                                      info.find("while") != StringRef::npos, pipeline));
                                 }
@@ -293,7 +293,7 @@ namespace mlir {
             funcOp.walk([&](Operation *op) {
 #define BIND(OpType)                   \
 if (auto sop = dyn_cast<OpType>(op)) \
-bind_operation(sop.starttime(), sop.endtime(), op);
+bind_operation(sop.getStarttime(), sop.getEndtime(), op);
                 BIND(tor::AddIOp)
                 BIND(tor::SubIOp)
                 BIND(tor::MulIOp)
@@ -338,7 +338,7 @@ bind_operation(sop.starttime(), sop.endtime(), op);
             }
 
             for (auto &op : funcOp.getRegion().front()) {
-                if (isa<tor::TimeGraphOp, ConstantOp>(op)) {
+                if (isa<tor::TimeGraphOp, arith::ConstantOp>(op)) {
                     continue;
                 }
                 if (!check_dependence(&op)) {

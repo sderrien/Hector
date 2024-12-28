@@ -5,7 +5,7 @@ set(LIBS
         ${conversion_libs}
         MLIROptLib
         MLIRTOR
-        MLIRHEC
+        #MLIRHEC
         nlohmann_json::nlohmann_json
         TORSCHEDULE
         ${LP_SOLVE_LIB}

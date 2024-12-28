@@ -1,0 +1,87 @@
+{
+  "cycle_duration_ns": 10,
+  "tasks": [
+    {
+      "id": "Op1",
+      "name": "Load Data",
+      "start_cycle": 0,
+      "start_offset_ns": 5,
+      "duration_cycles": 3,
+      "end_offset_ns": 3,
+      "progress": 100
+    },
+    {
+      "id": "Op2",
+      "name": "Multiply",
+      "start_cycle": 3,
+      "start_offset_ns": 2,
+      "duration_cycles": 4,
+      "end_offset_ns": 2,
+      "progress": 80,
+      "dependencies": ["Op1"],
+      "chain": "Chain1"
+    },
+    {
+      "id": "Op3",
+      "name": "Add",
+      "start_cycle": 7,
+      "start_offset_ns": 1,
+      "duration_cycles": 3,
+      "end_offset_ns": 3,
+      "progress": 60,
+      "dependencies": ["Op2"],
+      "chain": "Chain1"
+    },
+    {
+      "id": "Op4",
+      "name": "Store Result",
+      "start_cycle": 10,
+      "start_offset_ns": 4,
+      "duration_cycles": 2,
+      "end_offset_ns": 2,
+      "progress": 40,
+      "dependencies": ["Op3"]
+    },
+    {
+      "id": "Op5",
+      "name": "Initialize",
+      "start_cycle": 0,
+      "start_offset_ns": 0,
+      "duration_cycles": 2,
+      "end_offset_ns": 0,
+      "progress": 100
+    },
+    {
+      "id": "Op6",
+      "name": "Compute",
+      "start_cycle": 2,
+      "start_offset_ns": 5,
+      "duration_cycles": 3,
+      "end_offset_ns": 5,
+      "progress": 70,
+      "dependencies": ["Op5"],
+      "chain": "Chain2"
+    },
+    {
+      "id": "Op7",
+      "name": "Finalize",
+      "start_cycle": 5,
+      "start_offset_ns": 2,
+      "duration_cycles": 2,
+      "end_offset_ns": 3,
+      "progress": 50,
+      "dependencies": ["Op6"],
+      "chain": "Chain2"
+    }
+  ],
+  "chains": [
+    {
+      "id": "Chain1",
+      "name": "Arithmetic Chain"
+    },
+    {
+      "id": "Chain2",
+      "name": "Initialization Chain"
+    }
+  ]
+}

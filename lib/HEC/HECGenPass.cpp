@@ -15,10 +15,10 @@
 #include "HEC/HEC.h"
 #include "HEC/HECDialect.h"
 #include "HEC/PassDetail.h"
-#include "mlir/Analysis/Utils.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
-#include "mlir/IR/BlockAndValueMapping.h"
+//#include "mlir/Analysis/Utils.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+//#include "mlir/Dialect/StandardOps/IR/Ops.h"
+//#include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
@@ -26,7 +26,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/Utils.h"
+//#include "mlir/Transforms/Utils.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -36,6 +36,8 @@
 
 namespace mlir {
 namespace hecgen {
+    using namespace mlir::arith;
+    
 struct TimeNode;
 struct OpOnEdge;
 struct TimeEdge;
@@ -65,16 +67,16 @@ struct TimeNode {
   }
 
   int64_t getPipelineII() {
-    auto forop = llvm::dyn_cast<tor::ForOp>(op);
-    assert(forop != nullptr);
-    auto pipelineAttr = forop->getAttrOfType<IntegerAttr>("pipeline");
+    auto fOrIOp = llvm::dyn_cast<tor::ForOp>(op);
+    assert(fOrIOp != nullptr);
+    auto pipelineAttr = fOrIOp->getAttrOfType<IntegerAttr>("pipeline");
     if (pipelineAttr == nullptr)
       return -1;
     auto pipeline = pipelineAttr.getInt();
     if (!pipeline)
       return -1;
 
-    auto IIAttr = forop->getAttrOfType<IntegerAttr>("II");
+    auto IIAttr = fOrIOp->getAttrOfType<IntegerAttr>("II");
     assert(IIAttr != nullptr);
     return IIAttr.getInt();
   }
@@ -137,7 +139,7 @@ struct Memory {
       : id(id), type(type), op(op) {}
 
   mlir::Value getAddress() {
-    assert(op != nullptr && op.primitiveName() == "mem");
+    assert(op != nullptr && op.getPrimitiveName() == "mem");
     auto rw = op->getAttr("ports").cast<mlir::StringAttr>().getValue();
     if (rw == "r") {
       return op.getResult(1);
@@ -150,7 +152,7 @@ struct Memory {
     return nullptr;
   }
   mlir::Value getReadEnable() {
-    assert(op != nullptr && op.primitiveName() == "mem");
+    assert(op != nullptr && op.getPrimitiveName() == "mem");
     auto rw = op->getAttr("ports").cast<mlir::StringAttr>().getValue();
     if (rw == "r") {
       return op.getResult(0);
@@ -161,7 +163,7 @@ struct Memory {
     return nullptr;
   }
   mlir::Value getWriteEnable() {
-    assert(op != nullptr && op.primitiveName() == "mem");
+    assert(op != nullptr && op.getPrimitiveName() == "mem");
     auto rw = op->getAttr("ports").cast<mlir::StringAttr>().getValue();
     if (rw == "w" || rw == "rw") {
       return op.getResult(0);
@@ -170,7 +172,7 @@ struct Memory {
     return nullptr;
   }
   mlir::Value getReadData() {
-    assert(op != nullptr && op.primitiveName() == "mem");
+    assert(op != nullptr && op.getPrimitiveName() == "mem");
     auto rw = op->getAttr("ports").cast<mlir::StringAttr>().getValue();
     if (rw == "r") {
       return op.getResult(2);
@@ -181,7 +183,7 @@ struct Memory {
     return nullptr;
   }
   mlir::Value getWriteData() {
-    assert(op != nullptr && op.primitiveName() == "mem");
+    assert(op != nullptr && op.getPrimitiveName() == "mem");
     auto rw = op->getAttr("ports").cast<mlir::StringAttr>().getValue();
     if (rw == "w") {
       return op.getResult(2);
@@ -244,14 +246,14 @@ struct GlobalStorage {
   GlobalStorage(mlir::hec::DesignOp design, mlir::PatternRewriter &rewriter)
       : design(design), rewriter(rewriter) {}
 
-  void add_constant(mlir::ConstantOp constantop) {
+  void add_constant(arith::ConstantOp constantop) {
     ValueUseDef vud(value_count++, constantop.getResult(), constantop, -3,
                     ValueUseDef::Type::GlobalConstant);
     if (last == nullptr)
-      rewriter.setInsertionPointToStart(design.getBody());
+      rewriter.setInsertionPointToStart(design.getBodyBlock());
     else
       rewriter.setInsertionPoint(last);
-    auto new_constant_op = rewriter.create<mlir::ConstantOp>(
+    auto new_constant_op = rewriter.create<arith::ConstantOp>(
         design.getLoc(), constantop.getValue());
     vud.owner = new_constant_op;
     last = new_constant_op;
@@ -271,7 +273,7 @@ struct GlobalStorage {
                                         std::to_string(reg.id));
     auto pname = rewriter.getStringAttr("register");
     if (last == nullptr)
-      rewriter.setInsertionPointToStart(design.getBody());
+      rewriter.setInsertionPointToStart(design.getBodyBlock());
     else
       rewriter.setInsertionPointAfter(last);
     auto primitive = rewriter.create<hec::PrimitiveOp>(
@@ -322,7 +324,7 @@ struct GlobalStorage {
     auto pname = rewriter.getStringAttr(std::string("mem"));
 
     if (last == nullptr)
-      rewriter.setInsertionPointToStart(design.getBody());
+      rewriter.setInsertionPointToStart(design.getBodyBlock());
     else
       rewriter.setInsertionPointAfter(last);
 
@@ -344,7 +346,7 @@ struct GlobalStorage {
     for (auto vud : valueUseDefs)
       if (vud.value == value) {
         if (vud.type == ValueUseDef::Type::GlobalConstant)
-          return llvm::cast<ConstantOp>(vud.owner).getResult();
+          return llvm::cast<arith::ConstantOp>(vud.owner).getResult();
       }
     return nullptr;
   }
@@ -703,8 +705,8 @@ private:
     for (auto user : value.getUsers()) {
       auto ancient = user->getParentOp();
       while (!llvm::isa<tor::FuncOp>(ancient)) {
-        if (auto forOp = llvm::dyn_cast<tor::ForOp>(ancient)) {
-          auto pipelineAttr = forOp->getAttr("pipeline");
+        if (auto fOrIOp = llvm::dyn_cast<tor::ForOp>(ancient)) {
+          auto pipelineAttr = fOrIOp->getAttr("pipeline");
           if (pipelineAttr == nullptr)
             break;
           auto pipeline = pipelineAttr.cast<IntegerAttr>().getInt();
@@ -757,9 +759,9 @@ private:
               << std::endl;
 
     auto context = design.getContext();
-    rewriter.setInsertionPointToEnd(design.getBody());
+    rewriter.setInsertionPointToEnd(design.getBodyBlock());
 
-    mlir::StringAttr name = func.getNameAttr();
+    mlir::StringAttr name = func.getNameAttr().getAttr();
     llvm::SmallVector<mlir::hec::ComponentPortInfo, 4> ports;
     mlir::StringAttr interfc =
         mlir::StringAttr::get(context, llvm::StringRef("naked"));
@@ -768,7 +770,7 @@ private:
             ? mlir::StringAttr::get(context, llvm::StringRef("STG"))
             : rewriter.getStringAttr("pipeline");
 
-    auto funcType = func.getType();
+    auto funcType = func.getFunctionType();
 
     size_t icount = 0;
     for (auto inPort : funcType.getInputs()) {
@@ -820,13 +822,13 @@ private:
 
     switch (this->style) {
     case Style::NORMAL:
-      stg = llvm::dyn_cast<hec::StateSetOp>(component.getBody()->back());
+      stg = llvm::dyn_cast<hec::StateSetOp>(component.getBody().front().back());
       break;
     case Style::PIPELINEFOR:
       component->setAttr("pipeline", rewriter.getStringAttr("for"));
       component->setAttr("II", func->getAttr("II"));
       this->stageset =
-          llvm::dyn_cast<hec::StageSetOp>(component.getBody()->back());
+          llvm::dyn_cast<hec::StageSetOp>(component.getBody().front().back());
       break;
     case Style::PIPELINEFUNC:
       component->setAttr("latency",
@@ -835,7 +837,7 @@ private:
       if (func->getAttr("II") != nullptr)
         component->setAttr("II", func->getAttr("II"));
       this->stageset =
-          llvm::dyn_cast<hec::StageSetOp>(component.getBody()->back());
+          llvm::dyn_cast<hec::StageSetOp>(component.getBody().front().back());
       break;
     }
   }
@@ -853,9 +855,9 @@ private:
         // user->dump();
         if (auto ifop = llvm::dyn_cast<tor::IfOp>(user)) {
           if (this->style == Style::NORMAL)
-            vud.use.push_back(ifop.starttime());
+            vud.use.push_back(ifop.getStarttime());
           else
-            vud.use.push_back(ifop.endtime());
+            vud.use.push_back(ifop.getEndtime());
         } else if (auto yieldOp = llvm::dyn_cast<tor::YieldOp>(user)) {
           vud.use.push_back((yieldOp->getParentOp())
                                 ->getAttr("endtime")
@@ -892,9 +894,9 @@ private:
       //   // user->dump();
       //   if (auto ifop = llvm::dyn_cast<tor::IfOp>(user)) {
       //     if (this->style == Style::NORMAL)
-      //       vud.use.push_back(ifop.starttime());
+      //       vud.use.push_back(ifop.getStarttime());
       //     else
-      //       vud.use.push_back(ifop.endtime());
+      //       vud.use.push_back(ifop.getEndtime());
       //   } else if (auto yieldOp = llvm::dyn_cast<tor::YieldOp>(user)) {
       //     vud.use.push_back((yieldOp->getParentOp())
       //                           ->getAttr("endtime")
@@ -924,7 +926,7 @@ private:
         for (auto user : arg.getUsers()) {
           // user->dump();
           if (auto ifop = llvm::dyn_cast<tor::IfOp>(user)) {
-            vud.use.push_back(ifop.endtime());
+            vud.use.push_back(ifop.getEndtime());
           } else if (auto yieldOp = llvm::dyn_cast<tor::YieldOp>(user)) {
             vud.use.push_back((yieldOp->getParentOp())
                                   ->getAttr("endtime")
@@ -969,14 +971,14 @@ private:
         if (auto callop =
                 llvm::dyn_cast<tor::CallOp>(node.opsOnEdge.front().op)) {
           for (auto res : callop.getResults())
-            createVUD(res, callop, callop.endtime());
+            createVUD(res, callop, callop.getEndtime());
         }
         break;
 
       case TimeNode::NodeT::IF:
         if (auto ifop = llvm::dyn_cast<tor::IfOp>(node.op)) {
           for (auto res : ifop.getResults()) {
-            createVUD(res, ifop, ifop.endtime());
+            createVUD(res, ifop, ifop.getEndtime());
           }
         }
         for (auto opOnEdge : node.opsOnEdge) {
@@ -992,14 +994,14 @@ private:
           valueUseDefs.push_back({value_count++,
                                   whileop.getRegion(0).getArgument(0), whileop,
                                   i, ValueUseDef::Type::Variable});
-          valueUseDefs.back().use.push_back(whileop.endtime());
+          valueUseDefs.back().use.push_back(whileop.getEndtime());
 
           for (auto arg : whileop.getRegion(1).getArguments()) {
             createVUD(arg, whileop, i);
           }
 
           for (auto res : whileop.getResults())
-            createVUD(res, whileop, whileop.endtime());
+            createVUD(res, whileop, whileop.getEndtime());
         }
         for (auto opOnEdge : node.opsOnEdge) {
           auto op = opOnEdge.op;
@@ -1010,28 +1012,28 @@ private:
 
         break;
       case TimeNode::NodeT::FOR:
-        if (auto forop = llvm::dyn_cast<tor::ForOp>(node.op)) {
+        if (auto fOrIOp = llvm::dyn_cast<tor::ForOp>(node.op)) {
           auto II = node.getPipelineII();
           if (II == -1) {
             valueUseDefs.push_back(
-                {value_count++, nullptr, forop, i, ValueUseDef::Type::NoVal});
-            valueUseDefs.back().use.push_back(forop.endtime());
+                {value_count++, nullptr, fOrIOp, i, ValueUseDef::Type::NoVal});
+            valueUseDefs.back().use.push_back(fOrIOp.getEndtime());
           }
 
           if (style == Style::NORMAL) {
-            valueUseDefs.push_back({value_count++, forop.getInductionVar(),
-                                    forop, i, ValueUseDef::Type::Variable});
+            valueUseDefs.push_back({value_count++, fOrIOp.getInductionVar(),
+                                    fOrIOp, i, ValueUseDef::Type::Variable});
 
-            valueUseDefs.back().use.push_back(forop.endtime());
+            valueUseDefs.back().use.push_back(fOrIOp.getEndtime());
           } else {
-            createVUD(forop.getInductionVar(), forop, i);
-            valueUseDefs.back().use.push_back(forop.endtime());
+            createVUD(fOrIOp.getInductionVar(), fOrIOp, i);
+            valueUseDefs.back().use.push_back(fOrIOp.getEndtime());
           }
-          for (auto arg : forop.getRegionIterArgs())
-            createVUD(arg, forop, i);
+          for (auto arg : fOrIOp.getRegionIterArgs())
+            createVUD(arg, fOrIOp, i);
 
-          for (auto res : forop.results())
-            createVUD(res, forop, forop.endtime());
+          for (auto res : fOrIOp.getResults())
+            createVUD(res, fOrIOp, fOrIOp.getEndtime());
 
           for (auto opOnEdge : node.opsOnEdge) {
             auto op = opOnEdge.op;
@@ -1137,13 +1139,13 @@ private:
         PROCESSCOMB(tor::AddIOp)
         PROCESSCOMB(tor::SubIOp)
         PROCESSCOMB(tor::CmpIOp)
-        PROCESSCOMB(AndOp)
-        PROCESSCOMB(OrOp)
-        PROCESSCOMB(XOrOp)
-        PROCESSCOMB(ShiftLeftOp)
-        PROCESSCOMB(SignedShiftRightOp)
-        PROCESSCOMB(TruncateIOp)
-        PROCESSCOMB(SignExtendIOp)
+        PROCESSCOMB(AndIOp)
+        PROCESSCOMB(OrIOp)
+        PROCESSCOMB(XOrIOp)
+        PROCESSCOMB(ShLIOp)
+        PROCESSCOMB(ShRSIOp)
+        PROCESSCOMB(TruncIOp)
+        PROCESSCOMB(ExtSIOp)
         PROCESSCOMB(NegFOp)
         PROCESSCOMB(SelectOp)
 #undef PROCESSCOMB
@@ -1259,7 +1261,7 @@ private:
 #define addCell(OpType, cname, pname)                                          \
   if (auto top = llvm::dyn_cast<OpType>(op)) {                                 \
     multiCycleOpCollection.push_back(top);                                     \
-    Cell cell(cell_count++, top.starttime(), top.endtime(),                    \
+    Cell cell(cell_count++, top.getStarttime(), top.getEndtime(),                    \
               std::string(cname) + "_" + func.getName().str(), pname);         \
     op2cell[top] = cell.id;                                                    \
     cell.setTypes(top);                                                        \
@@ -1285,16 +1287,16 @@ private:
 
       addSTDCell(SIToFPOp, "i2f", "sitofp");
       addSTDCell(FPToSIOp, "f2i", "fptosi");
-      addSTDCell(SignedDivIOp, "divi", "div_integer");
+      addSTDCell(DivSIOp, "divi", "div_integer");
 #undef addSTDCell
 
 #define addCmpCell(OpType, cname, pname)                                       \
   if (auto top = llvm::dyn_cast<OpType>(op)) {                                 \
     multiCycleOpCollection.push_back(top);                                     \
-    Cell cell(cell_count++, top.starttime(), top.endtime(),                    \
+    Cell cell(cell_count++, top.getStarttime(), top.getEndtime(),                    \
               std::string(cname) + "_" + func.getName().str(),                 \
               std::string(pname) + "_" +                                       \
-                  tor::stringifyEnum(top.predicate()).str());                 \
+                  tor::stringifyEnum(top.getPredicate()).str());                 \
     op2cell[top] = cell.id;                                                    \
     cell.setTypes(top);                                                        \
     cells.push_back(cell);                                                     \
@@ -1409,7 +1411,7 @@ private:
         }
         created.insert(value2Reg[vud.id]);
 
-        rewriter.setInsertionPoint(&component.getBody()->back());
+        rewriter.setInsertionPoint(&component.getBody().front().back());
 
         auto context = component.getContext();
         llvm::SmallVector<mlir::Type, 2> types;
@@ -1438,7 +1440,7 @@ private:
       if (node.type == TimeNode::NodeT::CALL) {
         auto call = llvm::dyn_cast<tor::CallOp>(node.op);
 
-        auto callee = call.callee();
+        auto callee = call.getCallee();
 
         assert(stg != nullptr && "STG must be created first");
         rewriter.setInsertionPoint(stg);
@@ -1485,13 +1487,13 @@ private:
         CHECKCOMB(tor::AddIOp)
         CHECKCOMB(tor::SubIOp)
         CHECKCOMB(tor::CmpIOp)
-        CHECKCOMB(AndOp)
-        CHECKCOMB(OrOp)
-        CHECKCOMB(XOrOp)
-        CHECKCOMB(ShiftLeftOp)
-        CHECKCOMB(SignedShiftRightOp)
-        CHECKCOMB(TruncateIOp)
-        CHECKCOMB(SignExtendIOp)
+        CHECKCOMB(AndIOp)
+        CHECKCOMB(OrIOp)
+        CHECKCOMB(XOrIOp)
+        CHECKCOMB(ShLIOp)
+        CHECKCOMB(ShRSIOp)
+        CHECKCOMB(TruncIOp)
+        CHECKCOMB(ExtSIOp)
         CHECKCOMB(NegFOp)
         CHECKCOMB(SelectOp)
 #undef CHECKCOMB
@@ -1537,7 +1539,7 @@ private:
     }
   }
 
-  void set_state_for(size_t t, std::string state, tor::ForOp forop) {
+  void set_state_for(size_t t, std::string state, tor::ForOp fOrIOp) {
     auto node = nodes.at(t);
     for (auto opoe : node.opsOnEdge)
       for (auto res : opoe.op->getResults()) {
@@ -1545,13 +1547,13 @@ private:
         vud.state = state;
       }
 
-    auto &i_vud = getVUD(forop.getInductionVar(), forop);
+    auto &i_vud = getVUD(fOrIOp.getInductionVar(), fOrIOp);
     i_vud.state = state;
-    i_vud.wire = mapValue(forop.lowerBound(), t, state);
+    i_vud.wire = mapValue(fOrIOp.getLowerBound(), t, state);
 
-    auto ptr = forop.getIterOperands().begin();
-    for (auto arg : forop.getRegionIterArgs()) {
-      auto &vud = getVUD(arg, forop);
+    auto ptr = fOrIOp.getIterOperands().begin();
+    for (auto arg : fOrIOp.getRegionIterArgs()) {
+      auto &vud = getVUD(arg, fOrIOp);
       vud.state = state;
       vud.wire = mapValue(*ptr++, t, state);
     }
@@ -1574,13 +1576,14 @@ private:
     };
 
     auto createState = [&](std::string sno) {
-      rewriter.setInsertionPointToEnd(stg.getBody());
+      rewriter.setInsertionPointToEnd(&stg.getBody().front());
       auto context = stg.getContext();
       auto name = mlir::StringAttr::get(context, std::string("s") + sno);
       auto initial = mlir::IntegerAttr::get(mlir::IntegerType::get(context, 1),
                                             sno == "0");
       auto stateOp = rewriter.create<hec::StateOp>(stg.getLoc(), name, initial);
-      rewriter.setInsertionPointToEnd(stateOp.getBody());
+      rewriter.setInsertionPointToEnd(&stateOp.getBody().front());
+      
       auto transOp = rewriter.create<hec::TransitionOp>(stateOp.getLoc());
       transOp.getRegion().push_back(new mlir::Block());
 
@@ -1598,7 +1601,8 @@ private:
 
       auto state = rewriter.create<hec::StateOp>(stg.getLoc(), name, initial);
 
-      rewriter.setInsertionPointToEnd(state.getBody());
+      rewriter.setInsertionPointToEnd(&state.getBody().front());
+
       auto trans = rewriter.create<hec::TransitionOp>(state.getLoc());
       trans.getRegion().push_back(new mlir::Block());
 
@@ -1607,8 +1611,8 @@ private:
     };
 
     auto createGoto = [&](hec::StateOp state, std::string nextname) {
-      auto trans = llvm::dyn_cast<hec::TransitionOp>(state.getBody()->back());
-      rewriter.setInsertionPointToEnd(trans.getBody());
+      auto trans = llvm::dyn_cast<hec::TransitionOp>(state.getBody().front().back());
+      rewriter.setInsertionPointToEnd(&trans.getBody().front());
       auto next =
           mlir::StringAttr::get(stg.getContext(), std::string("s") + nextname);
       rewriter.create<hec::GotoOp>(trans.getLoc(), next.getValue(), nullptr);
@@ -1616,8 +1620,8 @@ private:
 
     auto createGotoCond = [&](hec::StateOp state, std::string nextname,
                               mlir::Value cond) {
-      auto trans = llvm::dyn_cast<hec::TransitionOp>(state.getBody()->back());
-      rewriter.setInsertionPointToEnd(trans.getBody());
+      auto trans = llvm::dyn_cast<hec::TransitionOp>(state.getBody().front().back());
+      rewriter.setInsertionPointToEnd(&trans.getBody().front());
       auto next =
           mlir::StringAttr::get(stg.getContext(), std::string("s") + nextname);
       rewriter.create<hec::GotoOp>(trans.getLoc(), next.getValue(), cond);
@@ -1754,12 +1758,12 @@ private:
 
         ret = gen_states(node.tend, tend, reach);
 
-        rewriter.setInsertionPoint(&state0.getBody()->back());
+        rewriter.setInsertionPoint(&state0.getBody().front().back());
         auto notcond =
             rewriter.create<hec::NotOp>(state0.getLoc(), rewriter.getI1Type(),
-                                        mapValue(ifop.condition(), t), nullptr);
+                                        mapValue(ifop.getCondition(), t), nullptr);
 
-        node.val = notcond.res();
+        node.val = notcond.getRes();
 
         if (node.edges[0].to != node.tend) {
           auto clock = getClock(node.edges[0]);
@@ -1780,7 +1784,7 @@ private:
               createGotoCond(curState,
                              std::to_string(id) + std::string("_then_") +
                                  std::to_string(i),
-                             mapValue(ifop.condition(), t));
+                             mapValue(ifop.getCondition(), t));
           }
           auto nextNodeId = node.edges[0].to;
           std::string nextname = std::to_string(node2State[nextNodeId]);
@@ -1789,10 +1793,10 @@ private:
             createGoto(statebags.back(), nextname);
           else
             createGotoCond(statebags.back(), nextname,
-                           mapValue(ifop.condition(), t));
+                           mapValue(ifop.getCondition(), t));
         } else {
           createGotoCond(state0, std::to_string(node2State[node.edges[0].to]),
-                         mapValue(ifop.condition(), t));
+                         mapValue(ifop.getCondition(), t));
         }
 
         if (node.edges[1].to != node.tend) {
@@ -1841,12 +1845,12 @@ private:
       } else {
         node.tthen = gen_states(node.edges[0].to, node.tend, 0);
         gen_states(node.tend, tend, reach);
-        rewriter.setInsertionPoint(&state0.getBody()->back());
+        rewriter.setInsertionPoint(&state0.getBody().front().back());
         auto notcond =
             rewriter.create<hec::NotOp>(state0.getLoc(), rewriter.getI1Type(),
-                                        mapValue(ifop.condition(), t), nullptr);
+                                        mapValue(ifop.getCondition(), t), nullptr);
 
-        node.val = notcond.res();
+        node.val = notcond.getRes();
         if (node.edges[0].to != node.tend) {
           auto clock = getClock(node.edges[0]);
           assert(clock >= 1);
@@ -1866,7 +1870,7 @@ private:
               createGotoCond(curState,
                              std::to_string(id) + std::string("_then_") +
                                  std::to_string(i),
-                             mapValue(ifop.condition(), t));
+                             mapValue(ifop.getCondition(), t));
           }
           auto nextNodeId = node.edges[0].to;
           std::string nextname = std::to_string(node2State[nextNodeId]);
@@ -1874,10 +1878,10 @@ private:
             createGoto(statebags.back(), nextname);
           else
             createGotoCond(statebags.back(), nextname,
-                           mapValue(ifop.condition(), t));
+                           mapValue(ifop.getCondition(), t));
         } else {
           createGotoCond(state0, std::to_string(node2State[node.edges[0].to]),
-                         mapValue(ifop.condition(), t));
+                         mapValue(ifop.getCondition(), t));
         }
 
         if (node.tthen != node.tend) {
@@ -1896,17 +1900,17 @@ private:
       node2State[t] = id;
       auto whileop = llvm::dyn_cast<tor::WhileOp>(node.op);
 
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+      rewriter.setInsertionPoint(&state0.getBody().front().back());
       auto notcond0 = rewriter.create<hec::NotOp>(
           state0.getLoc(), rewriter.getI1Type(),
           mapValue(whileop.getOperand(0), t), nullptr);
-      node.val0 = notcond0.res();
+      node.val0 = notcond0.getRes();
 
-      rewriter.setInsertionPoint(&state1.getBody()->back());
+      rewriter.setInsertionPoint(&state1.getBody().front().back());
       auto notcond1 = rewriter.create<hec::NotOp>(
           state1.getLoc(), rewriter.getI1Type(),
           mapValue(whileop.getRegion(0).getArgument(0), t), nullptr);
-      node.val1 = notcond1.res();
+      node.val1 = notcond1.getRes();
 
       auto while_end = node.edges[1].to;
       assert(node.edges.size() == 2 && "WHILE Node must have two successors");
@@ -1968,9 +1972,9 @@ private:
       createGoto(bags1.back(), nextname);
 
       createGotoCond(state0, std::to_string(node2State[while_end]),
-                     notcond0.res());
+                     notcond0.getRes());
       createGotoCond(state1, std::to_string(node2State[while_end]),
-                     notcond1.res());
+                     notcond1.getRes());
 
       createGoto(str2State[std::to_string(node2State[do_end])],
                  std::to_string(id) + std::string("_entry"));
@@ -1980,34 +1984,34 @@ private:
       auto state0 = createState(std::to_string(id));
       auto state1 = createStateAfter(std::to_string(id) + "_entry", state0);
       node2State[t] = id;
-      auto forop = llvm::dyn_cast<tor::ForOp>(node.op);
+      auto fOrIOp = llvm::dyn_cast<tor::ForOp>(node.op);
 
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+      rewriter.setInsertionPoint(&state0.getBody().front().back());
       auto cond = rewriter.create<hec::CmpIOp>(
           state0.getLoc(), rewriter.getI1Type(),
-          // mapValue(forop.getInductionVar(), t),
-          mapValue(forop.lowerBound(), t), mapValue(forop.upperBound(), t),
+          // mapValue(fOrIOp.getInductionVar(), t),
+          mapValue(fOrIOp.getLowerBound(), t), mapValue(fOrIOp.getUpperBound(), t),
           rewriter.getStringAttr("sle"), nullptr);
-      node.val0 = cond.res();
+      node.val0 = cond.getRes();
 
       rewriter.setInsertionPointAfter(cond);
 
       node.val0.dump();
-      auto val = mapOp2Reg(forop);
+      auto val = mapOp2Reg(fOrIOp);
       val.dump();
 
       auto assign = rewriter.create<hec::AssignOp>(
-          state0.getLoc(), mapOp2Reg(forop), node.val0, nullptr);
+          state0.getLoc(), mapOp2Reg(fOrIOp), node.val0, nullptr);
 
       rewriter.setInsertionPointAfter(assign);
       auto notcond = rewriter.create<hec::NotOp>(
-          state0.getLoc(), rewriter.getI1Type(), cond.res(), nullptr);
-      node.val1 = notcond.res();
+          state0.getLoc(), rewriter.getI1Type(), cond.getRes(), nullptr);
+      node.val1 = notcond.getRes();
 
-      rewriter.setInsertionPoint(&state1.getBody()->back());
+      rewriter.setInsertionPoint(&state1.getBody().front().back());
       auto notcond1 = rewriter.create<hec::NotOp>(
-          state1.getLoc(), rewriter.getI1Type(), mapOp2Reg(forop), nullptr);
-      node.val3 = notcond1.res();
+          state1.getLoc(), rewriter.getI1Type(), mapOp2Reg(fOrIOp), nullptr);
+      node.val3 = notcond1.getRes();
 
       assert(node.edges.size() == 2 && "FOR Node must have two successors");
       auto for_end = node.edges[1].to;
@@ -2055,7 +2059,7 @@ private:
           createGotoCond(curState,
                          std::to_string(id) + std::string("_entry_") +
                              std::to_string(i),
-                         mapOp2Reg(forop));
+                         mapOp2Reg(fOrIOp));
       }
 
       unsigned long nextNodeId;
@@ -2069,7 +2073,7 @@ private:
 
       createGoto(str2State[std::to_string(node2State[do_end])],
                  std::to_string(id) + std::string("_entry"));
-      set_state_for(t, state0.getName().str(), forop);
+      set_state_for(t, state0.getName().str(), fOrIOp);
     }
 
     // std::cerr << "node " << node.t << " return " << ret << std::endl;
@@ -2079,13 +2083,13 @@ private:
   auto gen_constants() {
     for (auto &vud : valueUseDefs)
       if (vud.type == ValueUseDef::Type::Constant) {
-        auto oldconst = llvm::dyn_cast<mlir::ConstantOp>(vud.owner);
+        auto oldconst = llvm::dyn_cast<arith::ConstantOp>(vud.owner);
 
         auto oldattr = oldconst.getValue();
 
-        rewriter.setInsertionPoint(&component.getBody()->back());
+        rewriter.setInsertionPoint(&component.getBody().front().back());
         auto constop =
-            rewriter.create<mlir::ConstantOp>(component.getLoc(), oldattr);
+            rewriter.create<arith::ConstantOp>(component.getLoc(), oldattr);
 
         vud.owner = constop;
         constop.dump();
@@ -2106,7 +2110,7 @@ private:
         registers[value2Reg[vud.id]].op.dump();
 
         auto state0 = str2State[std::string("0")];
-        rewriter.setInsertionPoint(&state0.getBody()->back());
+        rewriter.setInsertionPoint(&state0.getBody().front().back());
         rewriter.create<hec::AssignOp>(
             state0.getLoc(), registers[value2Reg[vud.id]].op.getResult(0), src,
             nullptr);
@@ -2115,16 +2119,16 @@ private:
 
   auto createNot(mlir::Value &cond0, mlir::Value cond, hec::StateOp state0) {
     bool found = 0;
-    for (auto notop : state0.getBody()->getOps<hec::NotOp>())
-      if (notop.src() == cond) {
-        cond0 = notop.res();
+    for (auto notop : state0.getBody().front().getOps<hec::NotOp>())
+      if (notop.getSrc() == cond) {
+        cond0 = notop.getRes();
         found = 1;
       }
     if (!found) {
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+      rewriter.setInsertionPoint(&state0.getBody().front().back());
       auto notop = rewriter.create<hec::NotOp>(
           state0.getLoc(), rewriter.getI1Type(), cond, nullptr);
-      cond0 = notop.res();
+      cond0 = notop.getRes();
     }
   }
 
@@ -2143,12 +2147,12 @@ private:
     if (cond2 != nullptr)
       cond1 = cond2;
 
-    auto t = load.starttime();
-    auto mem = mapValueMem(load.memref());
+    auto t = load.getStarttime();
+    auto mem = mapValueMem(load.getMemref());
 
     assert(mem.id != -1ul);
 
-    auto indices = load.indices();
+    auto indices = load.getIndices();
     assert(indices.size() == 1 && "Require 1 indice for LoadOp");
 
     auto address = mem.getAddress();
@@ -2157,7 +2161,7 @@ private:
 
     auto indice = mapValue(indices.front(), t, state0.getName().str());
 
-    auto res = mapValue(load.getResult(), load.endtime());
+    auto res = mapValue(load.getResult(), load.getEndtime());
     assert(indice != nullptr && address != nullptr && r_en != nullptr &&
            r_data != nullptr);
     assert(res != nullptr);
@@ -2165,12 +2169,12 @@ private:
     auto &vud = getVUD(load.getResult(), load);
     vud.wire = r_data;
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<mlir::hec::AssignOp>(state0.getLoc(), address, indice,
                                          cond0);
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<mlir::hec::EnableOp>(state0.getLoc(), r_en, cond0);
-    rewriter.setInsertionPoint(&state1.getBody()->back());
+    rewriter.setInsertionPoint(&state1.getBody().front().back());
     rewriter.create<mlir::hec::AssignOp>(state1.getLoc(), res, r_data, cond1);
   }
 
@@ -2188,9 +2192,9 @@ private:
     if (cond2 != nullptr)
       cond1 = cond2;
 
-    auto t = store.starttime();
-    auto mem = mapValueMem(store.memref());
-    auto indices = store.indices();
+    auto t = store.getStarttime();
+    auto mem = mapValueMem(store.getMemref());
+    auto indices = store.getIndices();
     assert(indices.size() == 1 && "Require 1 indice for StoreOp");
 
     auto address = mem.getAddress();
@@ -2200,18 +2204,18 @@ private:
     auto indice = mapValue(indices.front(), t, state0.getName().str());
 
     auto operand =
-        mapValue(store.value(), store.starttime(), state0.getName().str());
+        mapValue(store.getValue(), store.getStarttime(), state0.getName().str());
     assert(indice != nullptr && address != nullptr && w_en != nullptr &&
            w_data != nullptr);
     assert(operand != nullptr);
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPointToEnd(&state0.getBody().back());
     rewriter.create<mlir::hec::AssignOp>(state0.getLoc(), address, indice,
                                          cond0);
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPointToEnd(&state0.getBody().back());
     rewriter.create<mlir::hec::AssignOp>(state0.getLoc(), w_data, operand,
                                          cond0);
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPointToEnd(&state0.getBody().back());
     rewriter.create<mlir::hec::EnableOp>(state0.getLoc(), w_en, cond0);
   }
 
@@ -2223,15 +2227,15 @@ private:
     if (needNot)
       createNot(cond0, cond, state0);
 
-    auto t = bop.starttime();
-    auto lhs = mapValue(bop.lhs(), t, state0.getName().str());
-    auto rhs = mapValue(bop.rhs(), t, state0.getName().str());
+    auto t = bop.getStarttime();
+    auto lhs = mapValue(bop.getLhs(), t, state0.getName().str());
+    auto rhs = mapValue(bop.getRhs(), t, state0.getName().str());
 
     assert(lhs != nullptr && rhs != nullptr);
 
-    auto res = mapValue(bop.getResult(), bop.endtime());
+    auto res = mapValue(bop.getResult(), bop.getEndtime());
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     auto newOp = rewriter.create<hec::CmpIOp>(
         state0.getLoc(), bop.getResult().getType(), lhs, rhs,
         rewriter.getStringAttr(str), cond0);
@@ -2241,7 +2245,7 @@ private:
 
     std::cerr << "feed into vud.wire" << std::endl;
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<hec::AssignOp>(state0.getLoc(), res, newOp.getResult(),
                                    cond0);
   }
@@ -2266,7 +2270,7 @@ private:
         mapValue(bop.getResult(),
                  bop->template getAttrOfType<IntegerAttr>("endtime").getInt());
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
 
     auto newOp = rewriter.create<NewType>(
         state0.getLoc(), bop.getResult().getType(), lhs, cond0);
@@ -2276,7 +2280,7 @@ private:
 
     std::cerr << "feed into vud.wire" << std::endl;
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<hec::AssignOp>(state0.getLoc(), res, newOp.getResult(),
                                    cond0);
   }
@@ -2291,11 +2295,11 @@ private:
       createNot(cond0, cond, state0);
 
     auto t = bop->template getAttrOfType<IntegerAttr>("starttime").getInt();
-    // auto t = bop.starttime();
+    // auto t = bop.getStarttime();
 
     assert(state0 != nullptr);
-    auto lhs = mapValue(bop.lhs(), t, state0.getName().str());
-    auto rhs = mapValue(bop.rhs(), t, state0.getName().str());
+    auto lhs = mapValue(bop.getLhs(), t, state0.getName().str());
+    auto rhs = mapValue(bop.getRhs(), t, state0.getName().str());
 
     assert(lhs != nullptr && rhs != nullptr);
 
@@ -2303,7 +2307,7 @@ private:
         mapValue(bop.getResult(),
                  bop->template getAttrOfType<IntegerAttr>("endtime").getInt());
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
 
     auto newOp = rewriter.create<NewType>(
         state0.getLoc(), bop.getResult().getType(), lhs, rhs, cond0);
@@ -2313,12 +2317,12 @@ private:
 
     std::cerr << "feed into vud.wire" << std::endl;
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<hec::AssignOp>(state0.getLoc(), res, newOp.getResult(),
                                    cond0);
   }
 
-  auto insertSelectOp(hec::StateOp state0, SelectOp bop,
+  auto insertSelectOp(hec::StateOp state0, arith::SelectOp bop,
                       mlir::Value cond = nullptr, bool needNot = 0,
                       std::string str = "") {
     bop.dump();
@@ -2327,12 +2331,12 @@ private:
       createNot(cond0, cond, state0);
 
     auto t = bop->template getAttrOfType<IntegerAttr>("starttime").getInt();
-    // auto t = bop.starttime();
+    // auto t = bop.getStarttime();
 
     assert(state0 != nullptr);
-    auto condition = mapValue(bop.condition(), t, state0.getName().str());
-    auto lhs = mapValue(bop.true_value(), t, state0.getName().str());
-    auto rhs = mapValue(bop.false_value(), t, state0.getName().str());
+    auto condition = mapValue(bop.getCondition(), t, state0.getName().str());
+    auto lhs = mapValue(bop.getTrueValue(), t, state0.getName().str());
+    auto rhs = mapValue(bop.getFalseValue(), t, state0.getName().str());
 
     assert(condition != nullptr && lhs != nullptr && rhs != nullptr);
 
@@ -2340,7 +2344,7 @@ private:
         mapValue(bop.getResult(),
                  bop->template getAttrOfType<IntegerAttr>("endtime").getInt());
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPointToEnd(&state0.getBody().back());
 
     auto newOp = rewriter.create<hec::SelectOp>(
         state0.getLoc(), bop.getResult().getType(), condition, lhs, rhs, cond0);
@@ -2350,7 +2354,7 @@ private:
 
     std::cerr << "feed into vud.wire" << std::endl;
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPointToEnd(&state0.getBody().back());
     rewriter.create<hec::AssignOp>(state0.getLoc(), res, newOp.getResult(),
                                    cond0);
   }
@@ -2372,7 +2376,7 @@ private:
       cond1 = cond2;
 
     auto t = bop->template getAttrOfType<IntegerAttr>("starttime").getInt();
-    auto lhs = mapValue(bop.in(), t, state0.getName().str());
+    auto lhs = mapValue(bop.getIn(), t, state0.getName().str());
 
     assert(lhs != nullptr);
 
@@ -2387,10 +2391,10 @@ private:
     auto &vud = getVUD(bop.getResult(), bop);
     vud.wire = primitive.getResult(1);
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<mlir::hec::AssignOp>(state0.getLoc(),
                                          primitive.getResult(0), lhs, cond0);
-    rewriter.setInsertionPoint(&state1.getBody()->back());
+    rewriter.setInsertionPoint(&state1.getBody().front().back());
     rewriter.create<mlir::hec::AssignOp>(state1.getLoc(), res,
                                          primitive.getResult(1), cond1);
   }
@@ -2411,10 +2415,10 @@ private:
     if (cond2 != nullptr)
       cond1 = cond2;
 
-    // auto t = bop.starttime();
+    // auto t = bop.getStarttime();
     auto t = bop->template getAttrOfType<IntegerAttr>("starttime").getInt();
-    auto lhs = mapValue(bop.lhs(), t, state0.getName().str());
-    auto rhs = mapValue(bop.rhs(), t, state0.getName().str());
+    auto lhs = mapValue(bop.getLhs(), t, state0.getName().str());
+    auto rhs = mapValue(bop.getRhs(), t, state0.getName().str());
 
     assert(lhs != nullptr);
     assert(rhs != nullptr);
@@ -2430,13 +2434,13 @@ private:
     auto &vud = getVUD(bop.getResult(), bop);
     vud.wire = primitive.getResult(2);
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<mlir::hec::AssignOp>(state0.getLoc(),
                                          primitive.getResult(0), lhs, cond0);
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
     rewriter.create<mlir::hec::AssignOp>(state0.getLoc(),
                                          primitive.getResult(1), rhs, cond0);
-    rewriter.setInsertionPoint(&state1.getBody()->back());
+    rewriter.setInsertionPoint(&state1.getBody().front().back());
     rewriter.create<mlir::hec::AssignOp>(state1.getLoc(), res,
                                          primitive.getResult(2), cond1);
   }
@@ -2465,20 +2469,20 @@ private:
 
     BINDCOM(tor::AddIOp, hec::AddIOp)
     BINDCOM(tor::SubIOp, hec::SubIOp)
-    BINDCOM(AndOp, hec::AndOp)
-    BINDCOM(OrOp, hec::OrOp)
-    BINDCOM(XOrOp, hec::XOrOp)
-    BINDCOM(ShiftLeftOp, hec::ShiftLeftOp)
-    BINDCOM(SignedShiftRightOp, hec::SignedShiftRightOp)
+    BINDCOM(arith::AndIOp, hec::AndOp)
+    BINDCOM(arith::OrIOp, hec::OrOp)
+    BINDCOM(arith::XOrIOp, hec::XOrOp)
+    BINDCOM(arith::ShLIOp, hec::ShiftLeftOp)
+    BINDCOM(arith::ShRSIOp, hec::SignedShiftRightOp)
 #undef BINDCOM
 
 #define BINDCOMU(OpType, NewType)                                              \
   if (auto sop = llvm::dyn_cast<OpType>(op))                                   \
     insertCombUnaryOp<OpType, NewType>(state0, sop, nullptr);
 
-    BINDCOMU(NegFOp, hec::NegFOp)
-    BINDCOMU(TruncateIOp, hec::TruncateIOp)
-    BINDCOMU(SignExtendIOp, hec::SignExtendIOp)
+    BINDCOMU(arith::NegFOp, hec::NegFOp)
+    BINDCOMU(arith::TruncIOp, hec::TruncateIOp)
+    BINDCOMU(arith::ExtSIOp, hec::SignExtendIOp)
 #undef BINDCOMU
 
     if (auto sop = llvm::dyn_cast<SelectOp>(op))
@@ -2493,22 +2497,22 @@ private:
     BINDMULTICYCLE(tor::SubFOp)
     BINDMULTICYCLE(tor::MulFOp)
     BINDMULTICYCLE(tor::DivFOp)
-    BINDMULTICYCLE(SignedDivIOp)
+    BINDMULTICYCLE(mlir::arith::DivSIOp)
 
 #undef BINDMULTICYCLE
 
 #define BINDMULTICYCLEU(OpType)                                                \
   if (auto sop = llvm::dyn_cast<OpType>(op))                                   \
     insertMultiCycleUnaryOp<OpType>(state0, state1, sop, nullptr);
-    BINDMULTICYCLEU(SIToFPOp)
-    BINDMULTICYCLEU(FPToSIOp)
+    BINDMULTICYCLEU(mlir::arith::SIToFPOp)
+    BINDMULTICYCLEU(mlir::arith::FPToSIOp)
 #undef BINDMULTICYCLEU
 
     if (auto cmpf = llvm::dyn_cast<tor::CmpFOp>(op))
       insertMultiCycleBinaryOp(state0, state1, cmpf, nullptr);
     if (auto cmpi = llvm::dyn_cast<tor::CmpIOp>(op))
       insertCmpIOp(state0, cmpi, nullptr, 0,
-                   tor::stringifyEnum(cmpi.predicate()).str());
+                   tor::stringifyEnum(cmpi.getPredicate()).str());
 
     if (auto load = llvm::dyn_cast<tor::LoadOp>(op))
       insertLoadOp(state0, state1, load, nullptr);
@@ -2529,23 +2533,23 @@ private:
 
     auto ptr = instance.getResults().begin();
     for (auto operand : callop.getOperands()) {
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+      rewriter.setInsertionPoint(&state0.getBody().front().back());
       rewriter.create<hec::AssignOp>(
           state0.getLoc(), *ptr++, mapValue(operand, t, state0.getName().str()),
           nullptr);
     }
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
-    rewriter.create<hec::GoOp>(state0.getLoc(), instance.instanceName(),
+    rewriter.setInsertionPoint(&state0.getBody().front().back());
+    rewriter.create<hec::GoOp>(state0.getLoc(), instance.getInstanceName(),
                                nullptr);
     ptr++;
 
     for (auto result : callop.getResults())
       if (mapValue(result, t) != nullptr) {
-        rewriter.setInsertionPoint(&state0.getBody()->back());
+        rewriter.setInsertionPoint(&state0.getBody().front().back());
         rewriter.create<hec::AssignOp>(state0.getLoc(), mapValue(result, t),
                                        *ptr, instance.getResults().back());
-        rewriter.setInsertionPoint(&state1.getBody()->back());
+        rewriter.setInsertionPoint(&state1.getBody().front().back());
         rewriter.create<hec::AssignOp>(state1.getLoc(), mapValue(result, t),
                                        *ptr++, instance.getResults().back());
       }
@@ -2578,33 +2582,33 @@ private:
 #define BINDCOMBTHEN(OpType, NewType)                                          \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertCombBinaryOp<OpType, NewType>(state0, sop,                           \
-                                        mapValue(ifop.condition(), t));
+                                        mapValue(ifop.getCondition(), t));
           BINDCOMBTHEN(tor::AddIOp, hec::AddIOp)
           BINDCOMBTHEN(tor::SubIOp, hec::SubIOp)
-          BINDCOMBTHEN(AndOp, hec::AndOp)
-          BINDCOMBTHEN(OrOp, hec::OrOp)
-          BINDCOMBTHEN(XOrOp, hec::XOrOp)
-          BINDCOMBTHEN(ShiftLeftOp, hec::ShiftLeftOp)
-          BINDCOMBTHEN(SignedShiftRightOp, hec::SignedShiftRightOp)
+          BINDCOMBTHEN(AndIOp, hec::AndOp)
+          BINDCOMBTHEN(OrIOp, hec::OrOp)
+          BINDCOMBTHEN(XOrIOp, hec::XOrOp)
+          BINDCOMBTHEN(ShLIOp, hec::ShiftLeftOp)
+          BINDCOMBTHEN(ShRSIOp, hec::SignedShiftRightOp)
 
 #undef BINDCOMBTHEN
 
 #define BINDCOMBUTHEN(OpType, NewType)                                         \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertCombUnaryOp<OpType, NewType>(state0, sop,                            \
-                                       mapValue(ifop.condition(), t));
+                                       mapValue(ifop.getCondition(), t));
           BINDCOMBUTHEN(NegFOp, hec::NegFOp)
-          BINDCOMBUTHEN(TruncateIOp, hec::TruncateIOp)
-          BINDCOMBUTHEN(SignExtendIOp, hec::SignExtendIOp)
+          BINDCOMBUTHEN(TruncIOp, hec::TruncateIOp)
+          BINDCOMBUTHEN(ExtSIOp, hec::SignExtendIOp)
 #undef BINDCOMBUTHEN
 
           if (auto sop = llvm::dyn_cast<SelectOp>(opoe.op))
-            insertSelectOp(state0, sop, mapValue(ifop.condition(), t));
+            insertSelectOp(state0, sop, mapValue(ifop.getCondition(), t));
 
 #define BINDMULTICYCLEUTHEN(OpType)                                            \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertMultiCycleUnaryOp(state0, state_then, sop,                           \
-                            mapValue(ifop.condition(), t));
+                            mapValue(ifop.getCondition(), t));
           BINDMULTICYCLEUTHEN(SIToFPOp)
           BINDMULTICYCLEUTHEN(FPToSIOp)
 #undef BINDMULTICYCLEUTHEN
@@ -2612,52 +2616,52 @@ private:
 #define BINDMULTICYCLETHEN(OpType)                                             \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertMultiCycleBinaryOp(state0, state_then, sop,                          \
-                             mapValue(ifop.condition(), t));
+                             mapValue(ifop.getCondition(), t));
           BINDMULTICYCLETHEN(tor::MulIOp)
           BINDMULTICYCLETHEN(tor::AddFOp)
           BINDMULTICYCLETHEN(tor::SubFOp)
           BINDMULTICYCLETHEN(tor::MulFOp)
           BINDMULTICYCLETHEN(tor::DivFOp)
-          BINDMULTICYCLETHEN(SignedDivIOp)
+          BINDMULTICYCLETHEN(DivSIOp)
 #undef BINDMULTICYCLETHEN
 
           if (auto cmpf = llvm::dyn_cast<tor::CmpFOp>(opoe.op))
             insertMultiCycleBinaryOp(state0, state_then, cmpf,
-                                     mapValue(ifop.condition(), t));
+                                     mapValue(ifop.getCondition(), t));
           if (auto cmpi = llvm::dyn_cast<tor::CmpIOp>(opoe.op))
-            insertCmpIOp(state0, cmpi, mapValue(ifop.condition(), t), 0,
-                         tor::stringifyEnum(cmpi.predicate()).str());
+            insertCmpIOp(state0, cmpi, mapValue(ifop.getCondition(), t), 0,
+                         tor::stringifyEnum(cmpi.getPredicate()).str());
 
           if (auto load = llvm::dyn_cast<tor::LoadOp>(opoe.op))
             insertLoadOp(state0, state_then, load,
-                         mapValue(ifop.condition(), t));
+                         mapValue(ifop.getCondition(), t));
           if (auto store = llvm::dyn_cast<tor::StoreOp>(opoe.op))
             insertStoreOp(state0, state_then, store,
-                          mapValue(ifop.condition(), t));
+                          mapValue(ifop.getCondition(), t));
         }
 
       std::cerr << "yield then at node " << node.tthen << std::endl;
       auto &state_then_end = str2State[std::to_string(node2State[node.tthen])];
       auto yield = llvm::dyn_cast<tor::YieldOp>(
-          ifop.thenRegion().back().getTerminator());
+          ifop.getThenRegion().back().getTerminator());
 
       auto ptr = ifop.getResults().begin();
       for (auto operand : yield.getOperands()) {
-        rewriter.setInsertionPoint(&state_then_end.getBody()->back());
+        rewriter.setInsertionPoint(&state_then_end.getBody().front().back());
         rewriter.create<hec::AssignOp>(state_then_end.getLoc(),
                                        mapValue(*ptr, node.tthen),
                                        mapValue(operand, node.tthen), nullptr);
       }
     } else {
       auto yield = llvm::dyn_cast<tor::YieldOp>(
-          ifop.thenRegion().back().getTerminator());
+          ifop.getThenRegion().back().getTerminator());
 
       auto ptr = ifop.getResults().begin();
       for (auto operand : yield.getOperands()) {
-        rewriter.setInsertionPoint(&state0.getBody()->back());
+        rewriter.setInsertionPoint(&state0.getBody().front().back());
         rewriter.create<hec::AssignOp>(state0.getLoc(), mapValue(*ptr, node.t),
                                        mapValue(operand, node.t),
-                                       mapValue(ifop.condition(), t));
+                                       mapValue(ifop.getCondition(), t));
       }
     }
 
@@ -2681,33 +2685,33 @@ private:
 #define BINDCOMBELSE(OpType, NewType)                                          \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertCombBinaryOp<OpType, NewType>(state0, sop,                           \
-                                        mapValue(ifop.condition(), t), 1);
+                                        mapValue(ifop.getCondition(), t), 1);
             BINDCOMBELSE(tor::AddIOp, hec::AddIOp)
             BINDCOMBELSE(tor::SubIOp, hec::SubIOp)
-            BINDCOMBELSE(AndOp, hec::AndOp)
-            BINDCOMBELSE(OrOp, hec::OrOp)
-            BINDCOMBELSE(XOrOp, hec::XOrOp)
-            BINDCOMBELSE(ShiftLeftOp, hec::ShiftLeftOp)
-            BINDCOMBELSE(SignedShiftRightOp, hec::SignedShiftRightOp)
+            BINDCOMBELSE(AndIOp, hec::AndOp)
+            BINDCOMBELSE(OrIOp, hec::OrOp)
+            BINDCOMBELSE(XOrIOp, hec::XOrOp)
+            BINDCOMBELSE(ShLIOp, hec::ShiftLeftOp)
+            BINDCOMBELSE(ShRSIOp, hec::SignedShiftRightOp)
 
 #undef BINDCOMBELSE
 
 #define BINDCOMBUELSE(OpType, NewType)                                         \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertCombUnaryOp<OpType, NewType>(state0, sop,                            \
-                                       mapValue(ifop.condition(), t), 1);
+                                       mapValue(ifop.getCondition(), t), 1);
             BINDCOMBUELSE(NegFOp, hec::NegFOp)
-            BINDCOMBUELSE(TruncateIOp, hec::TruncateIOp)
-            BINDCOMBUELSE(SignExtendIOp, hec::SignExtendIOp)
+            BINDCOMBUELSE(TruncIOp, hec::TruncateIOp)
+            BINDCOMBUELSE(ExtSIOp, hec::SignExtendIOp)
 #undef BINDCOMBUELSE
 
             if (auto sop = llvm::dyn_cast<SelectOp>(opoe.op))
-              insertSelectOp(state0, sop, mapValue(ifop.condition(), t), 1);
+              insertSelectOp(state0, sop, mapValue(ifop.getCondition(), t), 1);
 
 #define BINDMULTICYCLEUELSE(OpType)                                            \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertMultiCycleUnaryOp(state0, state_else, sop,                           \
-                            mapValue(ifop.condition(), t), 1);
+                            mapValue(ifop.getCondition(), t), 1);
             BINDMULTICYCLEUELSE(SIToFPOp)
             BINDMULTICYCLEUELSE(FPToSIOp)
 #undef BINDMULTICYCLEUELSE
@@ -2715,49 +2719,49 @@ private:
 #define BINDMULTICYCLEELSE(OpType)                                             \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op))                              \
     insertMultiCycleBinaryOp(state0, state_else, sop,                          \
-                             mapValue(ifop.condition(), t), 1);
+                             mapValue(ifop.getCondition(), t), 1);
             BINDMULTICYCLEELSE(tor::MulIOp)
             BINDMULTICYCLEELSE(tor::AddFOp)
             BINDMULTICYCLEELSE(tor::SubFOp)
             BINDMULTICYCLEELSE(tor::MulFOp)
             BINDMULTICYCLEELSE(tor::DivFOp)
-            BINDMULTICYCLEELSE(SignedDivIOp)
+            BINDMULTICYCLEELSE(arith::DivSIOp)
 #undef BINDMULTICYCLEELSE
 
             if (auto cmpf = llvm::dyn_cast<tor::CmpFOp>(opoe.op))
               insertMultiCycleBinaryOp(state0, state_else, cmpf,
-                                       mapValue(ifop.condition(), t), 1);
+                                       mapValue(ifop.getCondition(), t), 1);
             if (auto cmpi = llvm::dyn_cast<tor::CmpIOp>(opoe.op))
-              insertCmpIOp(state0, cmpi, mapValue(ifop.condition(), t), 1,
-                           tor::stringifyEnum(cmpi.predicate()).str());
+              insertCmpIOp(state0, cmpi, mapValue(ifop.getCondition(), t), 1,
+                           tor::stringifyEnum(cmpi.getPredicate()).str());
 
             if (auto load = llvm::dyn_cast<tor::LoadOp>(opoe.op))
               insertLoadOp(state0, state_else, load,
-                           mapValue(ifop.condition(), t), 1);
+                           mapValue(ifop.getCondition(), t), 1);
             if (auto store = llvm::dyn_cast<tor::StoreOp>(opoe.op))
               insertStoreOp(state0, state_else, store,
-                            mapValue(ifop.condition(), t), 1);
+                            mapValue(ifop.getCondition(), t), 1);
           }
 
         auto &state_else_end =
             str2State[std::to_string(node2State[node.telse])];
         auto yield = llvm::dyn_cast<tor::YieldOp>(
-            ifop.elseRegion().back().getTerminator());
+            ifop.getElseRegion().back().getTerminator());
 
         auto ptr = ifop.getResults().begin();
         for (auto operand : yield.getOperands()) {
-          rewriter.setInsertionPoint(&state_else_end.getBody()->back());
+          rewriter.setInsertionPoint(&state_else_end.getBody().front().back());
           rewriter.create<hec::AssignOp>(
               state_else_end.getLoc(), mapValue(*ptr, node.telse),
               mapValue(operand, node.telse), nullptr);
         }
       } else {
         auto yield = llvm::dyn_cast<tor::YieldOp>(
-            ifop.elseRegion().back().getTerminator());
+            ifop.getElseRegion().back().getTerminator());
 
         auto ptr = ifop.getResults().begin();
         for (auto operand : yield.getOperands()) {
-          rewriter.setInsertionPoint(&state0.getBody()->back());
+          rewriter.setInsertionPoint(&state0.getBody().front().back());
           rewriter.create<hec::AssignOp>(state0.getLoc(),
                                          mapValue(*ptr, node.t),
                                          mapValue(operand, node.t), node.val);
@@ -2778,13 +2782,13 @@ private:
     std::vector<std::pair<mlir::Value, mlir::Value>> val2val;
 
     auto ptr = whileop.getOperands().begin();
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+   rewriter.setInsertionPointToEnd(&state0.getBody().back());
     rewriter.create<hec::AssignOp>(
         state0.getLoc(), mapValue(whileop.getRegion(0).getArgument(0), t),
         mapValue(*ptr++, t), nullptr);
 
     for (auto operand : whileop.getRegion(1).getArguments()) {
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+     rewriter.setInsertionPointToEnd(&state0.getBody().back());
       val2val.push_back(
           std::make_pair(mapValue(*ptr, t), mapValue(operand, t)));
       rewriter.create<hec::AssignOp>(state0.getLoc(), mapValue(operand, t),
@@ -2815,11 +2819,11 @@ private:
   }
       BINDCOMBDO(tor::AddIOp, hec::AddIOp)
       BINDCOMBDO(tor::SubIOp, hec::SubIOp)
-      BINDCOMBDO(AndOp, hec::AndOp)
-      BINDCOMBDO(OrOp, hec::OrOp)
-      BINDCOMBDO(XOrOp, hec::XOrOp)
-      BINDCOMBDO(ShiftLeftOp, hec::ShiftLeftOp)
-      BINDCOMBDO(SignedShiftRightOp, hec::SignedShiftRightOp)
+      BINDCOMBDO(arith::AndIOp, hec::AndOp)
+      BINDCOMBDO(arith::OrIOp, hec::OrOp)
+      BINDCOMBDO(arith::XOrIOp, hec::XOrOp)
+      BINDCOMBDO(arith::ShLIOp, hec::ShiftLeftOp)
+      BINDCOMBDO(arith::ShRSIOp, hec::SignedShiftRightOp)
 #undef BINDCOMBDO
 
 #define BINDCOMBUDO(OpType, NewType)                                           \
@@ -2830,8 +2834,8 @@ private:
         state_entry, sop, mapValue(whileop.getRegion(0).getArgument(0), t));   \
   }
       BINDCOMBUDO(NegFOp, hec::NegFOp)
-      BINDCOMBUDO(TruncateIOp, hec::TruncateIOp)
-      BINDCOMBUDO(SignExtendIOp, hec::SignExtendIOp)
+      BINDCOMBUDO(TruncIOp, hec::TruncateIOp)
+      BINDCOMBUDO(ExtSIOp, hec::SignExtendIOp)
 #undef BINDCOMBUDO
 
       if (auto sop = llvm::dyn_cast<SelectOp>(opoe.op)) {
@@ -2865,7 +2869,7 @@ private:
       BINDMULTICYCLEDO(tor::SubFOp)
       BINDMULTICYCLEDO(tor::MulFOp)
       BINDMULTICYCLEDO(tor::DivFOp)
-      BINDMULTICYCLEDO(SignedDivIOp)
+      BINDMULTICYCLEDO(arith::DivSIOp)
 
 #undef BINDMULTICYCLEDO
 
@@ -2879,10 +2883,10 @@ private:
 
       if (auto cmpi = llvm::dyn_cast<tor::CmpIOp>(opoe.op)) {
         insertCmpIOp(state0, cmpi, mapValue(whileop.getOperand(0), t), 0,
-                     tor::stringifyEnum(cmpi.predicate()).str());
+                     tor::stringifyEnum(cmpi.getPredicate()).str());
         insertCmpIOp(state_entry, cmpi,
                      mapValue(whileop.getRegion(0).getArgument(0), t), 0,
-                     tor::stringifyEnum(cmpi.predicate()).str());
+                     tor::stringifyEnum(cmpi.getPredicate()).str());
       }
       if (auto load = llvm::dyn_cast<tor::LoadOp>(opoe.op)) {
         insertLoadOp(state0, state0_next, load,
@@ -2911,14 +2915,14 @@ private:
       // operand.dump();
       if (!isCond) {
         isCond = 1;
-        rewriter.setInsertionPoint(&state_do_end.getBody()->back());
+        rewriter.setInsertionPointToEnd(&state_do_end.getBody().back());
         rewriter.create<hec::AssignOp>(
             state_do_end.getLoc(),
             mapValue(whileop.getRegion(0).getArgument(0), node.tthen),
             mapValue(operand, node.tthen), nullptr);
         continue;
       }
-      rewriter.setInsertionPoint(&state_do_end.getBody()->back());
+      rewriter.setInsertionPointToEnd(&state_do_end.getBody().back());
       rewriter.create<hec::AssignOp>(state_do_end.getLoc(),
                                      mapValue(*ptrItr++, node.tthen),
                                      mapValue(operand, node.tthen), nullptr);
@@ -2927,13 +2931,13 @@ private:
     // Set exit
     ptrItr = whileop.getRegion(1).getArguments().begin();
     for (auto result : whileop.getResults()) {
-      rewriter.setInsertionPoint(&state_entry.getBody()->back());
+      rewriter.setInsertionPointToEnd(&state_entry.getBody().back());
       rewriter.create<hec::AssignOp>(state_entry.getLoc(), mapValue(result, t),
                                      mapValue(*ptrItr++, t), node.val1);
     }
     ptrItr = whileop.getRegion(1).getArguments().begin();
     for (auto result : whileop.getResults()) {
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+      rewriter.setInsertionPointToEnd(&state0.getBody().back());
       rewriter.create<hec::AssignOp>(state0.getLoc(), mapValue(result, t),
                                      mapValue(*ptrItr++, t), node.val0);
     }
@@ -2941,7 +2945,7 @@ private:
 
   auto insertForOp(size_t t) {
     auto &node = nodes.at(t);
-    auto forop = llvm::dyn_cast<tor::ForOp>(node.op);
+    auto fOrIOp = llvm::dyn_cast<tor::ForOp>(node.op);
     auto &state0 = str2State[std::to_string(node2State[t])];
     auto &state_entry = str2State[std::to_string(node2State[t]) + "_entry"];
     auto &state_do_end = str2State[std::to_string(node.tthen)];
@@ -2949,14 +2953,14 @@ private:
     // First enter
     std::vector<std::pair<mlir::Value, mlir::Value>> val2val;
 
-    rewriter.setInsertionPoint(&state0.getBody()->back());
+    rewriter.setInsertionPointToEnd(&state0.getBody().back());
     rewriter.create<hec::AssignOp>(state0.getLoc(),
-                                   mapValue(forop.getInductionVar(), t),
-                                   mapValue(forop.lowerBound(), t), nullptr);
+                                   mapValue(fOrIOp.getInductionVar(), t),
+                                   mapValue(fOrIOp.getLowerBound(), t), nullptr);
 
-    auto ptr = forop.getIterOperands().begin();
-    for (auto operand : forop.getRegionIterArgs()) {
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+    auto ptr = fOrIOp.getIterOperands().begin();
+    for (auto operand : fOrIOp.getRegionIterArgs()) {
+      rewriter.setInsertionPointToEnd(&state0.getBody().back());
       rewriter.create<hec::AssignOp>(state0.getLoc(), mapValue(operand, t),
                                      mapValue(*ptr++, t), nullptr);
     }
@@ -2977,38 +2981,38 @@ private:
 #define BINDCOMBDO(OpType, NewType)                                            \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op)) {                            \
     insertCombBinaryOp<OpType, NewType>(state0, sop, node.val0);               \
-    insertCombBinaryOp<OpType, NewType>(state_entry, sop, mapOp2Reg(forop));   \
+    insertCombBinaryOp<OpType, NewType>(state_entry, sop, mapOp2Reg(fOrIOp));   \
   }
       BINDCOMBDO(tor::AddIOp, hec::AddIOp)
       BINDCOMBDO(tor::SubIOp, hec::SubIOp)
-      BINDCOMBDO(AndOp, hec::AndOp)
-      BINDCOMBDO(OrOp, hec::OrOp)
-      BINDCOMBDO(XOrOp, hec::XOrOp)
-      BINDCOMBDO(ShiftLeftOp, hec::ShiftLeftOp)
-      BINDCOMBDO(SignedShiftRightOp, hec::SignedShiftRightOp)
+      BINDCOMBDO(AndIOp, hec::AndOp)
+      BINDCOMBDO(OrIOp, hec::OrOp)
+      BINDCOMBDO(XOrIOp, hec::XOrOp)
+      BINDCOMBDO(ShLIOp, hec::ShiftLeftOp)
+      BINDCOMBDO(ShRSIOp, hec::SignedShiftRightOp)
 #undef BINDCOMBDO
 
 #define BINDCOMBUDO(OpType, NewType)                                           \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op)) {                            \
     insertCombUnaryOp<OpType, NewType>(state0, sop, node.val0);                \
-    insertCombUnaryOp<OpType, NewType>(state_entry, sop, mapOp2Reg(forop));    \
+    insertCombUnaryOp<OpType, NewType>(state_entry, sop, mapOp2Reg(fOrIOp));    \
   }
       BINDCOMBUDO(NegFOp, hec::NegFOp)
-      BINDCOMBUDO(TruncateIOp, hec::TruncateIOp)
-      BINDCOMBUDO(SignExtendIOp, hec::SignExtendIOp)
+      BINDCOMBUDO(TruncIOp, hec::TruncateIOp)
+      BINDCOMBUDO(ExtSIOp, hec::SignExtendIOp)
 #undef BINDCOMBUDO
 
       if (auto sop = llvm::dyn_cast<SelectOp>(opoe.op)) {
         insertSelectOp(state0, sop, node.val0);
-        insertSelectOp(state_entry, sop, mapOp2Reg(forop));
+        insertSelectOp(state_entry, sop, mapOp2Reg(fOrIOp));
       }
 
 #define BINDMULTICYCLEUDO(OpType)                                              \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op)) {                            \
     insertMultiCycleUnaryOp(state0, state0_next, sop, node.val0, 0,            \
-                            mapOp2Reg(forop));                                 \
+                            mapOp2Reg(fOrIOp));                                 \
     insertMultiCycleUnaryOp(state_entry, state_entry_next, sop,                \
-                            mapOp2Reg(forop));                                 \
+                            mapOp2Reg(fOrIOp));                                 \
   }
       BINDMULTICYCLEUDO(SIToFPOp)
       BINDMULTICYCLEUDO(FPToSIOp)
@@ -3017,48 +3021,48 @@ private:
 #define BINDMULTICYCLEDO(OpType)                                               \
   if (auto sop = llvm::dyn_cast<OpType>(opoe.op)) {                            \
     insertMultiCycleBinaryOp(state0, state0_next, sop, node.val0, 0,           \
-                             mapOp2Reg(forop));                                \
+                             mapOp2Reg(fOrIOp));                                \
     insertMultiCycleBinaryOp(state_entry, state_entry_next, sop,               \
-                             mapOp2Reg(forop));                                \
+                             mapOp2Reg(fOrIOp));                                \
   }
       BINDMULTICYCLEDO(tor::MulIOp)
       BINDMULTICYCLEDO(tor::AddFOp)
       BINDMULTICYCLEDO(tor::SubFOp)
       BINDMULTICYCLEDO(tor::MulFOp)
       BINDMULTICYCLEDO(tor::DivFOp)
-      BINDMULTICYCLEDO(SignedDivIOp)
+      BINDMULTICYCLEDO(arith::DivSIOp)
 
 #undef BINDMULTICYCLEDO
 
       if (auto cmpf = llvm::dyn_cast<tor::CmpFOp>(opoe.op)) {
         insertMultiCycleBinaryOp(state0, state0_next, cmpf, node.val0, 0,
-                                 mapOp2Reg(forop));
+                                 mapOp2Reg(fOrIOp));
         insertMultiCycleBinaryOp(state_entry, state_entry_next, cmpf,
-                                 mapOp2Reg(forop));
+                                 mapOp2Reg(fOrIOp));
       }
 
       if (auto cmpi = llvm::dyn_cast<tor::CmpIOp>(opoe.op)) {
         insertCmpIOp(state0, cmpi, node.val0, 0,
-                     tor::stringifyEnum(cmpi.predicate()).str());
-        insertCmpIOp(state_entry, cmpi, mapOp2Reg(forop), 0,
-                     tor::stringifyEnum(cmpi.predicate()).str());
+                     tor::stringifyEnum(cmpi.getPredicate()).str());
+        insertCmpIOp(state_entry, cmpi, mapOp2Reg(fOrIOp), 0,
+                     tor::stringifyEnum(cmpi.getPredicate()).str());
       }
       if (auto load = llvm::dyn_cast<tor::LoadOp>(opoe.op)) {
-        insertLoadOp(state0, state0_next, load, node.val0, 0, mapOp2Reg(forop));
-        insertLoadOp(state_entry, state_entry_next, load, mapOp2Reg(forop));
+        insertLoadOp(state0, state0_next, load, node.val0, 0, mapOp2Reg(fOrIOp));
+        insertLoadOp(state_entry, state_entry_next, load, mapOp2Reg(fOrIOp));
       }
       if (auto store = llvm::dyn_cast<tor::StoreOp>(opoe.op)) {
         insertStoreOp(state0, state0_next, store, node.val0, 0,
-                      mapOp2Reg(forop));
-        insertStoreOp(state_entry, state_entry_next, store, mapOp2Reg(forop));
+                      mapOp2Reg(fOrIOp));
+        insertStoreOp(state_entry, state_entry_next, store, mapOp2Reg(fOrIOp));
       }
     }
 
     // Set yield
     tor::YieldOp yield =
-        llvm::dyn_cast<tor::YieldOp>(forop.region().back().getTerminator());
+        llvm::dyn_cast<tor::YieldOp>(fOrIOp.getRegion().back().getTerminator());
 
-    auto ptrItr = forop.getRegionIterArgs().begin();
+    auto ptrItr = fOrIOp.getRegionIterArgs().begin();
 
     yield.dump();
 
@@ -3066,7 +3070,7 @@ private:
       std::cerr << "!!!!!" << std::endl;
       (*ptrItr).dump();
 
-      rewriter.setInsertionPoint(&state_do_end.getBody()->back());
+      rewriter.setInsertionPointToEnd(&state_do_end.getBody().back());
       rewriter.create<hec::AssignOp>(state_do_end.getLoc(),
                                      mapValue(*ptrItr++, node.tthen),
                                      mapValue(operand, node.tthen), nullptr);
@@ -3074,34 +3078,34 @@ private:
 
     // Update i, cond
 
-    mlir::Type iType = forop.getInductionVar().getType();
-    rewriter.setInsertionPoint(&state_do_end.getBody()->back());
+    mlir::Type iType = fOrIOp.getInductionVar().getType();
+    rewriter.setInsertionPointToEnd(&state_do_end.getBody().back());
     auto iAddStep = rewriter.create<hec::AddIOp>(
         state_do_end.getLoc(), iType,
-        mapValue(forop.getInductionVar(), node.tthen),
-        mapValue(forop.step(), node.tthen), nullptr);
+        mapValue(fOrIOp.getInductionVar(), node.tthen),
+        mapValue(fOrIOp.getStep(), node.tthen), nullptr);
     rewriter.setInsertionPointAfter(iAddStep);
     auto iassign = rewriter.create<hec::AssignOp>(
-        state_do_end.getLoc(), mapValue(forop.getInductionVar(), node.tthen),
-        iAddStep.res(), nullptr);
+        state_do_end.getLoc(), mapValue(fOrIOp.getInductionVar(), node.tthen),
+        iAddStep.getRes(), nullptr);
     rewriter.setInsertionPointAfter(iassign);
     auto iLessThan = rewriter.create<hec::CmpIOp>(
-        state_do_end.getLoc(), rewriter.getI1Type(), iAddStep.res(),
-        mapValue(forop.upperBound(), node.tthen), rewriter.getStringAttr("sle"),
+        state_do_end.getLoc(), rewriter.getI1Type(), iAddStep.getRes(),
+        mapValue(fOrIOp.getUpperBound(), node.tthen), rewriter.getStringAttr("sle"),
         nullptr);
     rewriter.setInsertionPointAfter(iLessThan);
-    rewriter.create<hec::AssignOp>(state_do_end.getLoc(), mapOp2Reg(forop),
-                                   iLessThan.res(), nullptr);
+    rewriter.create<hec::AssignOp>(state_do_end.getLoc(), mapOp2Reg(fOrIOp),
+                                   iLessThan.getRes(), nullptr);
     // Set exit
-    ptrItr = forop.getRegionIterArgs().begin();
-    for (auto result : forop.getResults()) {
-      rewriter.setInsertionPoint(&state_entry.getBody()->back());
+    ptrItr = fOrIOp.getRegionIterArgs().begin();
+    for (auto result : fOrIOp.getResults()) {
+      rewriter.setInsertionPointToEnd(&state_entry.getBody().back());
       rewriter.create<hec::AssignOp>(state_entry.getLoc(), mapValue(result, t),
                                      mapValue(*ptrItr++, t), node.val3);
     }
-    auto initialPtrItr = forop.getIterOperands().begin();
-    for (auto result : forop.getResults()) {
-      rewriter.setInsertionPoint(&state0.getBody()->back());
+    auto initialPtrItr = fOrIOp.getIterOperands().begin();
+    for (auto result : fOrIOp.getResults()) {
+      rewriter.setInsertionPointToEnd(&state0.getBody().back());
       rewriter.create<hec::AssignOp>(state0.getLoc(), mapValue(result, t),
                                      mapValue(*initialPtrItr++, t), node.val1);
     }
@@ -3150,11 +3154,11 @@ private:
 
   void gen_done(size_t t_end) {
     auto returnop =
-        llvm::dyn_cast<tor::ReturnOp>(func.getBodyBlock()->getTerminator());
+        llvm::dyn_cast<tor::ReturnOp>(func.getBody().front().getTerminator());
     auto &state_done = str2State[std::to_string(node2State[t_end])];
     auto trans =
-        llvm::dyn_cast<hec::TransitionOp>(state_done.getBody()->back());
-    rewriter.setInsertionPointToStart(trans.getBody());
+        llvm::dyn_cast<hec::TransitionOp>(state_done.getBody().front().back());
+    rewriter.setInsertionPointToStart(&trans.getBody().front());
 
     llvm::SmallVector<mlir::Value, 2> rets;
     for (auto res : returnop.getOperands())
@@ -3205,19 +3209,19 @@ public:
 
   unsigned gen_stages() {
     for (size_t i = 0, nCycle = cycles.size(); i < nCycle; i++) {
-      rewriter.setInsertionPointToEnd(stageset.getBody());
+      rewriter.setInsertionPointToEnd(&stageset.getBody().front());
       cycles.at(i).stageop = rewriter.create<hec::StageOp>(
           stageset.getLoc(),
           rewriter.getStringAttr(std::string("s") + std::to_string(i)));
     }
     // if (style == Style::PIPELINEFOR) {
-    //   auto forop = llvm::dyn_cast<tor::ForOp>(nodes[0].op);
-    //   for (auto operand : forop.getBody()->getArguments()) {
+    //   auto fOrIOp = llvm::dyn_cast<tor::ForOp>(nodes[0].op);
+    //   for (auto operand : fOrIOp.getBody()->getArguments()) {
     //     rewriter.setInsertionPoint(stageset);
     //     auto wire =
     //         rewriter.create<hec::WireOp>(component.getLoc(),
     //         operand.getType());
-    //     auto &vud = getVUD(operand, forop);
+    //     auto &vud = getVUD(operand, fOrIOp);
     //     vud.wire = wire;
     //   }
     // }
@@ -3241,11 +3245,11 @@ public:
     else if (nodes[t].type == TimeNode::NodeT::IF) {
       set_guards(nodes[t].tend, tend, guardVec, reach);
       auto ifop = llvm::dyn_cast<tor::IfOp>(nodes[t].op);
-      guardVec.push_back(std::make_pair(ifop.condition(), 0));
+      guardVec.push_back(std::make_pair(ifop.getCondition(), 0));
       set_guards(nodes[t].edges[0].to, nodes[t].tend, guardVec, 0);
       guardVec.pop_back();
       if (nodes[t].edges.size() == 2) {
-        guardVec.push_back(std::make_pair(ifop.condition(), 1));
+        guardVec.push_back(std::make_pair(ifop.getCondition(), 1));
         set_guards(nodes[t].edges[1].to, nodes[t].tend, guardVec, 0);
         guardVec.pop_back();
       }
@@ -3312,13 +3316,13 @@ public:
         bool found = false;
         for (auto &op : stageop.getOps())
           if (auto notop = llvm::dyn_cast<hec::NotOp>(op)) {
-            if (notop.src() == ret)
+            if (notop.getSrc() == ret)
               ret = notop.getResult();
             found = true;
             break;
           }
         if (!found) {
-          rewriter.setInsertionPointToEnd(stageop.getBody());
+          rewriter.setInsertionPointToEnd(&stageop.getBody().front());
           auto notop = rewriter.create<hec::NotOp>(
               stageop.getLoc(), rewriter.getI1Type(), ret, nullptr);
           ret = notop.getResult();
@@ -3330,17 +3334,17 @@ public:
     auto get_and_value = [&](mlir::Value lhs, mlir::Value rhs) {
       mlir::Value ret = nullptr;
       for (auto &op : stageop.getOps()) {
-        if (auto andop = llvm::dyn_cast<hec::AndOp>(op)) {
-          if ((andop.lhs() == lhs && andop.rhs() == rhs) ||
-              (andop.rhs() == lhs && andop.lhs() == rhs))
-            ret = andop.getResult();
+        if (auto AndIOp = llvm::dyn_cast<hec::AndOp>(op)) {
+          if ((AndIOp.getLhs() == lhs && AndIOp.getRhs() == rhs) ||
+              (AndIOp.getRhs() == lhs && AndIOp.getLhs() == rhs))
+            ret = AndIOp.getResult();
         }
       }
       if (ret == nullptr) {
-        rewriter.setInsertionPointToEnd(stageop.getBody());
-        auto andop = rewriter.create<hec::AndOp>(
+          rewriter.setInsertionPointToEnd(&stageop.getBody().front());
+        auto AndIOp = rewriter.create<hec::AndOp>(
             stageop.getLoc(), rewriter.getI1Type(), lhs, rhs, nullptr);
-        ret = andop.getResult();
+        ret = AndIOp.getResult();
       }
       return ret;
     };
@@ -3353,7 +3357,7 @@ public:
     if (nodes[from].type == TimeNode::NodeT::IF) {
       auto ifop = llvm::dyn_cast<tor::IfOp>(nodes[from].op);
       guardVec.push_back(
-          std::make_pair(ifop.condition(), !(nodes[from].edges[0].to == to)));
+          std::make_pair(ifop.getCondition(), !(nodes[from].edges[0].to == to)));
     }
 
     mlir::Value guard;
@@ -3380,14 +3384,14 @@ public:
     assert(lhs != nullptr);
     // assert(res != nullptr);
     auto stageop = cycles[startstage].stageop;
-    rewriter.setInsertionPointToEnd(stageop.getBody());
-    auto new_op = rewriter.create<NewType>(
+      rewriter.setInsertionPointToEnd(&stageop.getBody().front());
+      auto new_op = rewriter.create<NewType>(
         stageop.getLoc(), op.getResult().getType(), lhs, guard);
     getVUD(op.getResult(), op).wire = new_op.getResult();
 
     if (res != nullptr) {
-      rewriter.setInsertionPointToEnd(stageop.getBody());
-      rewriter.create<hec::AssignOp>(stageop.getLoc(), res, new_op.getResult(),
+        rewriter.setInsertionPointToEnd(&stageop.getBody().front());
+        rewriter.create<hec::AssignOp>(stageop.getLoc(), res, new_op.getResult(),
                                      guard);
     }
   }
@@ -3397,20 +3401,20 @@ public:
                            unsigned startstage, unsigned endstage) {
     assert(startstage == endstage);
     auto guard = gen_guard(from, to, startstage);
-    auto lhs = map_value_stage(op.lhs(), startstage);
-    auto rhs = map_value_stage(op.rhs(), startstage);
-    auto res = map_value_stage(op.result(), endstage + 1);
+    auto lhs = map_value_stage(op.getLhs(), startstage);
+    auto rhs = map_value_stage(op.getRhs(), startstage);
+    auto res = map_value_stage(op.getResult(), endstage + 1);
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     //   assert(res != nullptr);
     auto stageop = cycles[startstage].stageop;
-    rewriter.setInsertionPointToEnd(stageop.getBody());
+    rewriter.setInsertionPointToEnd(&stageop.getBody().front());
     auto new_op = rewriter.create<NewType>(
         stageop.getLoc(), op.getResult().getType(), lhs, rhs, guard);
     getVUD(op.getResult(), op).wire = new_op.getResult();
 
     if (res != nullptr) {
-      rewriter.setInsertionPointToEnd(stageop.getBody());
+      rewriter.setInsertionPointToEnd(&stageop.getBody().front());
       rewriter.create<hec::AssignOp>(stageop.getLoc(), res, new_op.getResult(),
                                      guard);
     }
@@ -3420,22 +3424,22 @@ public:
                            unsigned startstage, unsigned endstage) {
     assert(startstage == endstage);
     auto guard = gen_guard(from, to, startstage);
-    auto lhs = map_value_stage(op.lhs(), startstage);
-    auto rhs = map_value_stage(op.rhs(), startstage);
-    auto res = map_value_stage(op.result(), endstage + 1);
+    auto lhs = map_value_stage(op.getLhs(), startstage);
+    auto rhs = map_value_stage(op.getRhs(), startstage);
+    auto res = map_value_stage(op.getResult(), endstage + 1);
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     //   assert(res != nullptr);
     auto stageop = cycles[startstage].stageop;
-    rewriter.setInsertionPointToEnd(stageop.getBody());
+    rewriter.setInsertionPointToEnd(&stageop.getBody().front());
 
     auto new_op = rewriter.create<hec::CmpIOp>(
         stageop.getLoc(), op.getResult().getType(), lhs, rhs,
-        tor::stringifyEnum(op.predicate()), guard);
+        tor::stringifyEnum(op.getPredicate()), guard);
     getVUD(op.getResult(), op).wire = new_op.getResult();
 
     if (res != nullptr) {
-      rewriter.setInsertionPointToEnd(stageop.getBody());
+      rewriter.setInsertionPointToEnd(&stageop.getBody().front());
       rewriter.create<hec::AssignOp>(stageop.getLoc(), res, new_op.getResult(),
                                      guard);
     }
@@ -3445,23 +3449,23 @@ public:
                              unsigned startstage, unsigned endstage) {
     assert(startstage == endstage);
     auto guard = gen_guard(from, to, startstage);
-    auto condition = map_value_stage(op.condition(), startstage);
-    auto lhs = map_value_stage(op.true_value(), startstage);
-    auto rhs = map_value_stage(op.false_value(), startstage);
-    auto res = map_value_stage(op.result(), endstage + 1);
+    auto condition = map_value_stage(op.getCondition(), startstage);
+    auto lhs = map_value_stage(op.getTrueValue(), startstage);
+    auto rhs = map_value_stage(op.getFalseValue(), startstage);
+    auto res = map_value_stage(op.getResult(), endstage + 1);
     assert(condition != nullptr);
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     //   assert(res != nullptr);
     auto stageop = cycles[startstage].stageop;
-    rewriter.setInsertionPointToEnd(stageop.getBody());
+    rewriter.setInsertionPointToEnd(&stageop.getBody().front());
 
     auto new_op = rewriter.create<hec::SelectOp>(
         stageop.getLoc(), op.getResult().getType(), condition, lhs, rhs, guard);
     getVUD(op.getResult(), op).wire = new_op.getResult();
 
     if (res != nullptr) {
-      rewriter.setInsertionPointToEnd(stageop.getBody());
+      rewriter.setInsertionPointToEnd(&stageop.getBody().front());
       rewriter.create<hec::AssignOp>(stageop.getLoc(), res, new_op.getResult(),
                                      guard);
     }
@@ -3476,7 +3480,7 @@ public:
     assert(startstage < endstage);
     auto guard0 = gen_guard(from, to, startstage);
     auto guard1 = gen_guard(from, to, endstage);
-    auto lhs = map_value_stage(op.in(), startstage);
+    auto lhs = map_value_stage(op.getIn(), startstage);
     auto res = map_value_stage(op->getResult(0), endstage + 1);
     assert(lhs != nullptr);
     // assert(res != nullptr);
@@ -3485,12 +3489,12 @@ public:
 
     auto stageop0 = cycles[startstage].stageop;
     auto stageop1 = cycles[endstage].stageop;
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<hec::AssignOp>(stageop0.getLoc(), primitive.getResult(0),
                                    lhs, guard0);
 
     if (res != nullptr) {
-      rewriter.setInsertionPointToEnd(stageop1.getBody());
+      rewriter.setInsertionPointToEnd(&stageop1.getBody().front());
       rewriter.create<hec::AssignOp>(stageop1.getLoc(), res,
                                      primitive.getResult(1), guard1);
     }
@@ -3507,9 +3511,9 @@ public:
     assert(startstage < endstage);
     auto guard0 = gen_guard(from, to, startstage);
     auto guard1 = gen_guard(from, to, endstage);
-    auto lhs = map_value_stage(op.lhs(), startstage);
-    auto rhs = map_value_stage(op.rhs(), startstage);
-    auto res = map_value_stage(op.result(), endstage + 1);
+    auto lhs = map_value_stage(op.getLhs(), startstage);
+    auto rhs = map_value_stage(op.getRhs(), startstage);
+    auto res = map_value_stage(op.getResult(), endstage + 1);
     assert(lhs != nullptr);
     assert(rhs != nullptr);
     // assert(res != nullptr);
@@ -3518,20 +3522,20 @@ public:
 
     auto stageop0 = cycles[startstage].stageop;
     auto stageop1 = cycles[endstage].stageop;
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<hec::AssignOp>(stageop0.getLoc(), primitive.getResult(0),
                                    lhs, guard0);
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<hec::AssignOp>(stageop0.getLoc(), primitive.getResult(1),
                                    rhs, guard0);
 
     if (res != nullptr) {
-      rewriter.setInsertionPointToEnd(stageop1.getBody());
+      rewriter.setInsertionPointToEnd(&stageop1.getBody().front());
       rewriter.create<hec::AssignOp>(stageop1.getLoc(), res,
                                      primitive.getResult(2), guard1);
     }
 
-    getVUD(op.result(), op).wire = primitive.getResult(2);
+    getVUD(op.getResult(), op).wire = primitive.getResult(2);
   }
 
   void gen_LoadOp_on_stage(unsigned from, unsigned to, tor::LoadOp load,
@@ -3540,10 +3544,10 @@ public:
     auto guard0 = gen_guard(from, to, startstage);
     auto guard1 = gen_guard(from, to, endstage);
 
-    auto mem = mapValueMem(load.memref());
+    auto mem = mapValueMem(load.getMemref());
 
     assert(mem.id != -1ul);
-    auto indices = load.indices();
+    auto indices = load.getIndices();
     assert(indices.size() == 1 && "Require 1 indice for LoadOp");
 
     auto address = mem.getAddress();
@@ -3563,18 +3567,18 @@ public:
     auto stageop0 = cycles[startstage].stageop;
     auto stageop1 = cycles[endstage].stageop;
 
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<mlir::hec::AssignOp>(stageop0.getLoc(), address, indice,
                                          guard0);
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<mlir::hec::EnableOp>(stageop0.getLoc(), r_en, guard0);
 
     if (res != nullptr) {
-      rewriter.setInsertionPointToEnd(stageop1.getBody());
+      rewriter.setInsertionPointToEnd(&stageop1.getBody().front());
       rewriter.create<mlir::hec::AssignOp>(stageop1.getLoc(), res, r_data,
                                            guard1);
     }
-    getVUD(load.result(), load).wire = r_data;
+    getVUD(load.getResult(), load).wire = r_data;
   }
 
   void gen_StoreOp_on_stage(unsigned from, unsigned to, tor::StoreOp store,
@@ -3583,10 +3587,10 @@ public:
     auto guard0 = gen_guard(from, to, startstage);
     // auto guard1 = gen_guard(from, to, endstage);
 
-    auto mem = mapValueMem(store.memref());
+    auto mem = mapValueMem(store.getMemref());
 
     assert(mem.id != -1ul);
-    auto indices = store.indices();
+    auto indices = store.getIndices();
     assert(indices.size() == 1 && "Require 1 indice for StoreOp");
 
     auto address = mem.getAddress();
@@ -3595,7 +3599,7 @@ public:
 
     auto indice = map_value_stage(indices.front(), startstage);
 
-    auto operand = map_value_stage(store.value(), startstage);
+    auto operand = map_value_stage(store.getValue(), startstage);
 
     assert(indice != nullptr && address != nullptr && w_en != nullptr &&
            w_data != nullptr);
@@ -3604,13 +3608,13 @@ public:
     auto stageop0 = cycles[startstage].stageop;
     // auto stageop1 = cycles[endstage].stageop;
 
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<mlir::hec::AssignOp>(stageop0.getLoc(), address, indice,
                                          guard0);
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<mlir::hec::AssignOp>(stageop0.getLoc(), w_data, operand,
                                          guard0);
-    rewriter.setInsertionPointToEnd(stageop0.getBody());
+    rewriter.setInsertionPointToEnd(&stageop0.getBody().front());
     rewriter.create<mlir::hec::EnableOp>(stageop0.getLoc(), w_en, guard0);
   }
 
@@ -3626,11 +3630,11 @@ public:
 
     GENCOMB(tor::AddIOp, hec::AddIOp)
     GENCOMB(tor::SubIOp, hec::SubIOp)
-    GENCOMB(AndOp, hec::AndOp)
-    GENCOMB(OrOp, hec::OrOp)
-    GENCOMB(XOrOp, hec::XOrOp)
-    GENCOMB(ShiftLeftOp, hec::ShiftLeftOp)
-    GENCOMB(SignedShiftRightOp, hec::SignedShiftRightOp)
+    GENCOMB(arith::AndIOp, hec::AndOp)
+    GENCOMB(arith::OrIOp, hec::OrOp)
+    GENCOMB(arith::XOrIOp, hec::XOrOp)
+    GENCOMB(arith::ShLIOp, hec::ShiftLeftOp)
+    GENCOMB(arith::ShRSIOp, hec::SignedShiftRightOp)
 #undef GENCOMB
 
 #define GENCOMBU(OldType, NewType)                                             \
@@ -3638,12 +3642,12 @@ public:
     gen_CombUnaryOp_on_stage<OldType, NewType>(from, to, sop, startstage,      \
                                                endstage - 1);
 
-    GENCOMBU(NegFOp, hec::NegFOp)
-    GENCOMBU(TruncateIOp, hec::TruncateIOp)
-    GENCOMBU(SignExtendIOp, hec::SignExtendIOp)
+    GENCOMBU(arith::NegFOp, hec::NegFOp)
+    GENCOMBU(arith::TruncIOp, hec::TruncateIOp)
+    GENCOMBU(arith::ExtSIOp, hec::SignExtendIOp)
 #undef GENCOMBU
 
-    if (auto sop = llvm::dyn_cast<SelectOp>(op))
+    if (auto sop = llvm::dyn_cast<arith::SelectOp>(op))
       gen_SelectOp_on_stage(from, to, sop, startstage, endstage - 1);
 
     if (auto cmpi = llvm::dyn_cast<tor::CmpIOp>(op)) {
@@ -3653,8 +3657,8 @@ public:
 #define GENMULTICYCLEU(OpType)                                                 \
   if (auto sop = llvm::dyn_cast<OpType>(op))                                   \
     gen_MultiCycleUnaryOp_on_stage(from, to, sop, startstage, endstage);
-    GENMULTICYCLEU(SIToFPOp)
-    GENMULTICYCLEU(FPToSIOp)
+    GENMULTICYCLEU(arith::SIToFPOp)
+    GENMULTICYCLEU(arith::FPToSIOp)
 
 #undef GENMULTICYCLEU
 
@@ -3667,7 +3671,7 @@ public:
     GENMULTICYCLE(tor::MulIOp)
     GENMULTICYCLE(tor::MulFOp)
     GENMULTICYCLE(tor::DivFOp)
-    GENMULTICYCLE(SignedDivIOp)
+    GENMULTICYCLE(arith::DivSIOp)
     GENMULTICYCLE(tor::CmpFOp)
 #undef GENMULTICYCLE
 
@@ -3716,13 +3720,13 @@ public:
           rewriter.getStringAttr("i"));
       inductionWire = wire.getResult();
 
-      auto forop = llvm::dyn_cast<tor::ForOp>(nodes[0].op);
+      auto fOrIOp = llvm::dyn_cast<tor::ForOp>(nodes[0].op);
 
       for (auto &x : valueUseDefs)
-        if (x.value == forop.getInductionVar())
+        if (x.value == fOrIOp.getInductionVar())
           x.wire = inductionWire;
 
-      for (unsigned j = 0; j < component.numInPorts() - 1; j++) {
+      for (unsigned j = 0; j < component.getNumInPorts() - 1; j++) {
         component.getArgument(j).dump();
         std::cerr << "the id for argument " << j << " is "
                   << findVUD(func.getArgument(j)).id << std::endl;
@@ -3743,27 +3747,27 @@ public:
       }
 
       size_t i = 0;
-      for (auto arg : forop.getRegionIterArgs()) {
+      for (auto arg : fOrIOp.getRegionIterArgs()) {
         rewriter.setInsertionPoint(stageset);
 
-        if (forop.initArgs()[i].isa<BlockArgument>()) {
+        if (fOrIOp.getInitArgs()[i].isa<BlockArgument>()) {
           rewriter.create<hec::InitOp>(
               component.getLoc(), // reg.getResult(0),
               registers[pipelineRegs[findVUD(arg).id].begin()->second]
                   .op.getResult(0),
               component.getArgument(
-                  forop.initArgs()[i].cast<BlockArgument>().getArgNumber()));
+                  fOrIOp.getInitArgs()[i].cast<BlockArgument>().getArgNumber()));
         } else {
           rewriter.create<hec::InitOp>(
               component.getLoc(), // reg.getResult(0),
               registers[pipelineRegs[findVUD(arg).id].begin()->second]
                   .op.getResult(0),
-              glbStorage.getConstant(forop.initArgs()[i]));
+              glbStorage.getConstant(fOrIOp.getInitArgs()[i]));
         }
         i++;
       }
     } else {
-      for (unsigned j = 0; j < component.numInPorts() - 1; j++) {
+      for (unsigned j = 0; j < component.getNumInPorts() - 1; j++) {
         component.getArgument(j).dump();
         std::cerr << "the id for argument " << j << " is "
                   << findVUD(func.getArgument(j)).id << std::endl;
@@ -3810,11 +3814,11 @@ public:
         auto ifop = llvm::dyn_cast<tor::IfOp>(node.op);
         auto &node_end = nodes.at(node.tend);
         auto yield_then = llvm::dyn_cast<tor::YieldOp>(
-            ifop.thenRegion().front().getTerminator());
+            ifop.getThenRegion().front().getTerminator());
 
-        auto ptr = yield_then.results().begin();
-        for (auto res : ifop.results()) {
-          rewriter.setInsertionPointToEnd(stageop.getBody());
+        auto ptr = yield_then.getResults().begin();
+        for (auto res : ifop.getResults()) {
+          rewriter.setInsertionPointToEnd(&stageop.getBody().front());
           auto guard =
               gen_guard(node_end.backEdges[0].from, node.tend, stage - 1);
           std::cerr << "guard: ";
@@ -3829,10 +3833,10 @@ public:
 
         if (node.edges.size() == 2) {
           auto yield_else = llvm::dyn_cast<tor::YieldOp>(
-              ifop.elseRegion().front().getTerminator());
-          auto ptr = yield_else.results().begin();
-          for (auto res : ifop.results()) {
-            rewriter.setInsertionPointToEnd(stageop.getBody());
+              ifop.getElseRegion().front().getTerminator());
+          auto ptr = yield_else.getResults().begin();
+          for (auto res : ifop.getResults()) {
+            rewriter.setInsertionPointToEnd(&stageop.getBody().front());
             rewriter.create<hec::AssignOp>(
                 stageop.getLoc(), map_value_stage(res, stage),
                 map_value_stage(*ptr, stage - 1),
@@ -3848,31 +3852,31 @@ public:
       auto returnop = llvm::dyn_cast<tor::ReturnOp>(
           func.getRegion().front().getTerminator());
       llvm::SmallVector<mlir::Value, 2> results;
-      for (auto res : returnop.operands()) {
+      for (auto res : returnop.getOperands()) {
         results.push_back(map_value_stage(res, stage));
       }
-      rewriter.setInsertionPointToEnd(stageop.getBody());
+      rewriter.setInsertionPointToEnd(&stageop.getBody().front());
       rewriter.create<hec::YieldOp>(stageop.getLoc(),
                                     mlir::ValueRange(results));
     } else {
       std::cerr << "???" << std::endl;
       // component.dump();
       auto node = nodes.at(0);
-      auto forop = llvm::dyn_cast<tor::ForOp>(node.op);
+      auto fOrIOp = llvm::dyn_cast<tor::ForOp>(node.op);
       auto yieldop = llvm::dyn_cast<tor::YieldOp>(
-          forop.getRegion().back().getTerminator());
+          fOrIOp.getRegion().back().getTerminator());
 
       auto retop = llvm::dyn_cast<tor::ReturnOp>(
           func.getRegion().back().getTerminator());
 
       std::map<size_t, size_t> res2ret;
-      for (size_t i = 0; i < retop.operands().size(); i++) {
+      for (size_t i = 0; i < retop.getOperands().size(); i++) {
         auto value = retop.getOperand(i);
         auto op = value.getDefiningOp();
-        if (auto forop = llvm::dyn_cast<tor::ForOp>(op)) {
+        if (auto fOrIOp = llvm::dyn_cast<tor::ForOp>(op)) {
           bool found = 0;
-          for (size_t j = 0; j < forop.getResults().size(); j++)
-            if (forop.getResult(j) == value) {
+          for (size_t j = 0; j < fOrIOp.getResults().size(); j++)
+            if (fOrIOp.getResult(j) == value) {
               found = 1;
               res2ret[j] = i;
             }
@@ -3885,14 +3889,14 @@ public:
         std::cerr << "return " << pr.first << " to " << pr.second << std::endl;
       }
 
-      for (size_t i = 0; i < yieldop.results().size(); i++) {
+      for (size_t i = 0; i < yieldop.getResults().size(); i++) {
         auto res = yieldop->getOperand(i);
 
         ValueUseDef vud = findVUD(res);
         ValueUseDef vud_ =
-            findVUD(forop.getRegionIterArgs().take_front(i + 1).back());
+            findVUD(fOrIOp.getRegionIterArgs().take_front(i + 1).back());
 
-        forop.getRegionIterArgs().take_front(i + 1).back().dump();
+        fOrIOp.getRegionIterArgs().take_front(i + 1).back().dump();
 
         auto stage = depth[vud.def];
 #define COMB(type)                                                             \
@@ -3900,14 +3904,14 @@ public:
     stage -= 1;
         COMB(tor::AddIOp)
         COMB(tor::CmpIOp)
-        COMB(AndOp)
-        COMB(OrOp)
-        COMB(XOrOp)
-        COMB(ShiftLeftOp)
-        COMB(SignedShiftRightOp)
+        COMB(AndIOp)
+        COMB(OrIOp)
+        COMB(XOrIOp)
+        COMB(ShLIOp)
+        COMB(ShRSIOp)
         COMB(NegFOp)
-        COMB(TruncateIOp)
-        COMB(SignExtendIOp)
+        COMB(TruncIOp)
+        COMB(ExtSIOp)
         COMB(SelectOp)
 #undef COMB
 
@@ -3919,46 +3923,46 @@ public:
         auto II = component->getAttrOfType<IntegerAttr>("II").getInt();
 
         if (auto ifop = dyn_cast<tor::IfOp>(vud.owner)) {
-          rewriter.setInsertionPointToEnd(stageop.getBody());
+          rewriter.setInsertionPointToEnd(&stageop.getBody().front());
           auto rid = pipelineRegs[vud.id][stage];
           rewriter.create<hec::DeliverOp>(
               stageop.getLoc(), registers[rid].op.getResult(0),
               map_value_stage(
-                  forop.getRegionIterArgs().take_front(i + 1).back(),
+                  fOrIOp.getRegionIterArgs().take_front(i + 1).back(),
                   stage + 1 > II ? stage + 1 - II : 1),
               (res2ret.find(i) != res2ret.end())
-                  ? component.getArgument(component.numInPorts() + res2ret[i])
+                  ? component.getArgument(component.getNumInPorts() + res2ret[i])
                   : component.getArgument(component.getNumArguments() - 1),
               nullptr);
         } else {
           auto rid = pipelineRegs[vud.id][stage + 1];
-          for (auto &op : *stageop.getBody())
+          for (auto &op : stageop.getBody().front())
             if (auto assign = llvm::dyn_cast<hec::AssignOp>(op))
-              if (assign.dest() == registers[rid].op->getResult(0)) {
-                rewriter.setInsertionPointToEnd(stageop.getBody());
+              if (assign.getDest() == registers[rid].op->getResult(0)) {
+                rewriter.setInsertionPointToEnd(&stageop.getBody().front());
                 rewriter.create<hec::DeliverOp>(
-                    stageop.getLoc(), assign.src(),
+                    stageop.getLoc(), assign.getSrc(),
                     map_value_stage(
-                        forop.getRegionIterArgs().take_front(i + 1).back(),
+                        fOrIOp.getRegionIterArgs().take_front(i + 1).back(),
                         stage + 1 > II ? stage + 1 - II : 1),
                     (res2ret.find(i) != res2ret.end())
-                        ? component.getArgument(component.numInPorts() +
+                        ? component.getArgument(component.getNumInPorts() +
                                                 res2ret[i])
                         : component.getArgument(component.getNumArguments() -
                                                 1),
-                    assign.guard());
+                    assign.getGuard());
               }
         }
       }
     }
 
     if (style == Style::PIPELINEFOR) {
-      auto forop = llvm::dyn_cast<tor::ForOp>(nodes[0].op);
-      auto vud = findVUD(forop.getInductionVar());
+      auto fOrIOp = llvm::dyn_cast<tor::ForOp>(nodes[0].op);
+      auto vud = findVUD(fOrIOp.getInductionVar());
       auto ptr_next = pipelineRegs[vud.id].find(1);
       if (ptr_next != pipelineRegs[vud.id].end()) {
         auto stageop = cycles[0].stageop;
-        rewriter.setInsertionPointToEnd(stageop.getBody());
+        rewriter.setInsertionPointToEnd(&stageop.getBody().front());
         rewriter.create<hec::AssignOp>(
             stageop.getLoc(), registers[ptr_next->second].op.getResult(0),
             inductionWire, nullptr);
@@ -3968,11 +3972,11 @@ public:
 
     llvm::SmallVector<hec::PrimitiveOp, 8> toErase;
 
-    for (auto &op : *component.getBody())
+    for (auto &op : component.getBody().front())
       if (auto reg = llvm::dyn_cast<hec::PrimitiveOp>(op))
-        if (reg.primitiveName() == "register" &&
+        if (reg.getPrimitiveName() == "register" &&
             reg.getResult(0).getUses().empty()) {
-          auto regname = reg.instanceName();
+          auto regname = reg.getInstanceName();
           // std::cerr << regname.str() << std::endl;
           auto stagestr = regname.rsplit('_').second.str();
           unsigned stage = std::stoi(stagestr);
@@ -4003,7 +4007,7 @@ public:
         for (; ptr_next != pipelineRegs[vud.id].end();) {
           auto stage = ptr->first;
           auto stageop = cycles[stage].stageop;
-          rewriter.setInsertionPointToEnd(stageop.getBody());
+          rewriter.setInsertionPointToEnd(&stageop.getBody().front());
           rewriter.create<hec::AssignOp>(
               stageop.getLoc(), registers[ptr_next->second].op.getResult(0),
               registers[ptr->second].op.getResult(0), nullptr);
@@ -4012,9 +4016,9 @@ public:
         }
       }
 
-    for (auto &op : *component.getBody())
+    for (auto &op : component.getBody().front())
       if (auto reg = llvm::dyn_cast<hec::PrimitiveOp>(op)) {
-        auto regname = reg.instanceName();
+        auto regname = reg.getInstanceName();
         auto stagestr = regname.rsplit('_').second.str();
         unsigned stage = std::stoi(stagestr);
         unsigned stageafter =
@@ -4036,16 +4040,16 @@ public:
          cycleptr++) {
       auto isEmpty = [&]() {
         auto stateop = cycleptr->stageop;
-        return stateop.getBody()->getOperations().size() == 0;
+        return stateop.getBody().front().getOperations().size() == 0;
       };
 
       if (isEmpty()) {
         unsigned stagetoerase =
             std::stoi(cycleptr->stageop.getName().drop_front().str());
         std::cerr << "Erase stage " << stagetoerase << std::endl;
-        for (auto &op : *component.getBody())
+        for (auto &op : component.getBody().front())
           if (auto reg = llvm::dyn_cast<hec::PrimitiveOp>(op)) {
-            auto regname = reg.instanceName();
+            auto regname = reg.getInstanceName();
             auto stagestr = regname.rsplit('_').second.str();
             unsigned stage = std::stoi(stagestr);
             if (stage == stagetoerase) {
@@ -4174,19 +4178,19 @@ public:
     // bool edynamic = false;
     // bool estatic = false;
 
-    for (auto &op : func.body().front()) {
+    for (auto &op : func.getBody().front()) {
       if (llvm::isa<mlir::tor::TimeGraphOp>(op)) {
         auto tg = llvm::dyn_cast<mlir::tor::TimeGraphOp>(op);
-        for (auto i = tg.starttime(); i <= tg.endtime(); i++)
+        for (auto i = tg.getStarttime(); i <= tg.getEndtime(); i++)
           nodes.push_back(TimeNode(i));
-        nc = tg.endtime() - tg.starttime() + 1;
+        nc = tg.getEndtime() - tg.getStarttime() + 1;
         ec = 0;
-        for (auto &op1 : tg.region().front())
+        for (auto &op1 : tg.getRegion().front())
           if (llvm::isa<mlir::tor::SuccTimeOp>(op1)) {
             auto succ = llvm::dyn_cast<mlir::tor::SuccTimeOp>(op1);
-            auto to = succ.time();
-            auto froms = succ.points();
-            auto eattrarray = succ.edges();
+            auto to = succ.getTime();
+            auto froms = succ.getPoints();
+            auto eattrarray = succ.getEdges();
             for (size_t i = 0; i < froms.size(); i++) {
               auto fromAttr = froms[i];
               auto edict = eattrarray[i].cast<mlir::DictionaryAttr>();
@@ -4232,7 +4236,7 @@ public:
     func.walk([&](mlir::Operation *op) {
 #define BIND(OpType)                                                           \
   if (auto sop = llvm::dyn_cast<OpType>(op))                                   \
-    bind_operation(sop.starttime(), sop.endtime(), op);
+    bind_operation(sop.getStarttime(), sop.getEndtime(), op);
       BIND(tor::AddIOp)
       BIND(tor::SubIOp)
       BIND(tor::MulIOp)
@@ -4250,49 +4254,49 @@ public:
   if (auto sop = llvm::dyn_cast<OpType>(op))                                   \
     bind_operation(sop->getAttrOfType<IntegerAttr>("starttime").getInt(),      \
                    sop->getAttrOfType<IntegerAttr>("endtime").getInt(), op);
-      BINDSTD(AndOp);
-      BINDSTD(OrOp);
-      BINDSTD(XOrOp);
-      BINDSTD(ShiftLeftOp);
+      BINDSTD(AndIOp);
+      BINDSTD(OrIOp);
+      BINDSTD(XOrIOp);
+      BINDSTD(ShLIOp);
       BINDSTD(NegFOp)
-      BINDSTD(SignedShiftRightOp);
-      BINDSTD(TruncateIOp);
-      BINDSTD(SignExtendIOp);
+      BINDSTD(ShRSIOp);
+      BINDSTD(TruncIOp);
+      BINDSTD(ExtSIOp);
       BINDSTD(SIToFPOp)
       BINDSTD(FPToSIOp)
       BINDSTD(SelectOp)
-      BINDSTD(SignedDivIOp)
+      BINDSTD(arith::DivSIOp)
 #undef BINDSTD
 
       if (auto callOp = llvm::dyn_cast<tor::CallOp>(op)) {
-        nodes[callOp.starttime()].opsOnEdge.push_back(
-            {callOp.starttime(), callOp.endtime(), callOp});
-        assert(nodes[callOp.starttime()].op == nullptr);
-        nodes[callOp.starttime()].op = callOp;
-        nodes[callOp.starttime()].tend = callOp.endtime();
-        nodes[callOp.starttime()].type = TimeNode::NodeT::CALL;
+        nodes[callOp.getStarttime()].opsOnEdge.push_back(
+            {callOp.getStarttime(), callOp.getEndtime(), callOp});
+        assert(nodes[callOp.getStarttime()].op == nullptr);
+        nodes[callOp.getStarttime()].op = callOp;
+        nodes[callOp.getStarttime()].tend = callOp.getEndtime();
+        nodes[callOp.getStarttime()].type = TimeNode::NodeT::CALL;
       }
       if (auto ifop = llvm::dyn_cast<tor::IfOp>(op)) {
-        assert(nodes[ifop.starttime()].op == nullptr);
-        nodes[ifop.starttime()].op = ifop;
-        nodes[ifop.starttime()].tend = ifop.endtime();
-        nodes[ifop.starttime()].type = TimeNode::NodeT::IF;
+        assert(nodes[ifop.getStarttime()].op == nullptr);
+        nodes[ifop.getStarttime()].op = ifop;
+        nodes[ifop.getStarttime()].tend = ifop.getEndtime();
+        nodes[ifop.getStarttime()].type = TimeNode::NodeT::IF;
       } else if (auto whileOp = llvm::dyn_cast<tor::WhileOp>(op)) {
-        nodes[whileOp.endtime()].op = whileOp;
-        nodes[whileOp.endtime()].t = whileOp.starttime();
-        nodes[whileOp.endtime()].type = TimeNode::NodeT::ENDWHILE;
-        assert(nodes[whileOp.starttime()].op == nullptr);
-        nodes[whileOp.starttime()].op = whileOp;
-        nodes[whileOp.starttime()].tend = whileOp.endtime();
-        nodes[whileOp.starttime()].type = TimeNode::NodeT::WHILE;
-      } else if (auto forOp = llvm::dyn_cast<tor::ForOp>(op)) {
-        nodes[forOp.endtime()].op = forOp;
-        nodes[forOp.endtime()].t = forOp.starttime();
-        nodes[forOp.endtime()].type = TimeNode::NodeT::ENDFOR;
-        assert(nodes[forOp.starttime()].op == nullptr);
-        nodes[forOp.starttime()].op = forOp;
-        nodes[forOp.starttime()].tend = forOp.endtime();
-        nodes[forOp.starttime()].type = TimeNode::NodeT::FOR;
+        nodes[whileOp.getEndtime()].op = whileOp;
+        nodes[whileOp.getEndtime()].t = whileOp.getStarttime();
+        nodes[whileOp.getEndtime()].type = TimeNode::NodeT::ENDWHILE;
+        assert(nodes[whileOp.getStarttime()].op == nullptr);
+        nodes[whileOp.getStarttime()].op = whileOp;
+        nodes[whileOp.getStarttime()].tend = whileOp.getEndtime();
+        nodes[whileOp.getStarttime()].type = TimeNode::NodeT::WHILE;
+      } else if (auto fOrIOp = llvm::dyn_cast<tor::ForOp>(op)) {
+        nodes[fOrIOp.getEndtime()].op = fOrIOp;
+        nodes[fOrIOp.getEndtime()].t = fOrIOp.getStarttime();
+        nodes[fOrIOp.getEndtime()].type = TimeNode::NodeT::ENDFOR;
+        assert(nodes[fOrIOp.getStarttime()].op == nullptr);
+        nodes[fOrIOp.getStarttime()].op = fOrIOp;
+        nodes[fOrIOp.getStarttime()].tend = fOrIOp.getEndtime();
+        nodes[fOrIOp.getStarttime()].type = TimeNode::NodeT::FOR;
       }
     });
     dbg_print_timeGraph();
@@ -4312,6 +4316,66 @@ public:
   std::string getName() { return (std::string)this->symbol; }
 };
 
+/// Gets the IntegerAttribute named "startTime" from an operation.
+    uint32_t getStartTimeAttr(Operation *op) {
+        // Ensure the operation is valid.
+        if (!op) {
+            llvm::errs() << "Operation is null, cannot get startTime attribute.\n";
+            return 0; // Return a default value (0) if operation is invalid.
+        }
+
+        // Get the "startTime" attribute.
+        if (auto attr = op->getAttrOfType<IntegerAttr>("startTime")) {
+            return attr.getInt();  // Return the integer value of the attribute.
+        }
+
+        llvm::errs() << "Attribute 'startTime' not found.\n";
+        return -1; // Return 0 if the attribute is not found.
+    }
+
+/// Gets the IntegerAttribute named "endTime" from an operation.
+    uint32_t getEndTimeAttr(Operation *op) {
+        // Ensure the operation is valid.
+        if (!op) {
+            llvm::errs() << "Operation is null, cannot get endTime attribute.\n";
+            return 0; // Return a default value (0) if operation is invalid.
+        }
+
+        // Get the "endTime" attribute.
+        if (auto attr = op->getAttrOfType<IntegerAttr>("endTime")) {
+            return attr.getInt();  // Return the integer value of the attribute.
+        }
+
+        llvm::errs() << "Attribute 'endTime' not found.\n";
+        return -1; // Return 0 if the attribute is not found.
+    }
+/// Sets an IntegerAttribute named "startTime" to an operation.
+    void setStartTimeAttr(Operation *op, uint32_t startTime) {
+        // Ensure the operation is valid.
+        if (!op) {
+            llvm::errs() << "Operation is null, cannot set startTime attribute.\n";
+            return;
+        }
+        OpBuilder builder(op->getContext());
+
+        // Create an IntegerAttr with the given uint32_t value.
+        auto startTimeAttr = builder.getI32IntegerAttr(startTime);
+        // Set the attribute on the operation.
+        op->setAttr("startTime", startTimeAttr);
+    }
+
+    void setEndTimeAttr(Operation *op, uint32_t endTime) {
+        // Ensure the operation is valid.
+        if (!op) {
+            llvm::errs() << "Operation is null, cannot set startTime attribute.\n";
+            return;
+        }
+        OpBuilder builder(op->getContext());
+        // Create an IntegerAttr with the given uint32_t value.
+        auto startTimeAttr = builder.getI32IntegerAttr(endTime);
+        // Set the attribute on the operation.
+        op->setAttr("endTime", startTimeAttr);
+    }
 void standardizeFunc(mlir::tor::FuncOp func, mlir::PatternRewriter &rewriter) {
   std::map<size_t, size_t> dict;
   size_t count = 0;
@@ -4320,48 +4384,50 @@ void standardizeFunc(mlir::tor::FuncOp func, mlir::PatternRewriter &rewriter) {
       dict[node] = count++;
   };
 
-  for (auto &op : func.body().front())
+  for (auto &op : func.getBody().front())
     if (auto tg = llvm::dyn_cast<mlir::tor::TimeGraphOp>(op)) {
-      auto starttime = tg.starttime();
+      auto starttime = tg.getStarttime();
       add2Dict(starttime);
-      for (auto &op1 : tg.region().front())
+      for (auto &op1 : tg.getRegion().front())
         if (auto succ = llvm::dyn_cast<tor::SuccTimeOp>(op1)) {
-          add2Dict(succ.time());
-          auto froms = succ.points();
+          add2Dict(succ.getTime());
+          auto froms = succ.getPoints();
           for (auto attr : froms)
             add2Dict(attr.cast<mlir::IntegerAttr>().getInt());
         }
 
-      tg.starttimeAttr(
-          rewriter.getIntegerAttr(tg.starttimeAttr().getType(), 0));
-      tg.endtimeAttr(
-          rewriter.getIntegerAttr(tg.endtimeAttr().getType(), count - 1));
+      tg.setStarttime( 0);
+      tg.setEndtime( count - 1);
 
-      for (auto &op1 : tg.region().front())
+      for (auto &op1 : tg.getRegion().front())
         if (auto succ = llvm::dyn_cast<tor::SuccTimeOp>(op1)) {
-          auto to = succ.time();
-          succ.timeAttr(
-              rewriter.getIntegerAttr(succ.timeAttr().getType(), dict[to]));
+          auto to = succ.getTime();
+          succ.setTime(dict[to]);
 
-          llvm::SmallVector<mlir::IntegerAttr, 2> arr;
+            llvm::SmallVector<mlir::Attribute, 2> arr;
 
-          for (auto attr : succ.points())
-            arr.push_back(rewriter.getIntegerAttr(
-                attr.cast<mlir::IntegerAttr>().getType(),
-                dict[attr.cast<mlir::IntegerAttr>().getInt()]));
+            for (auto attr : succ.getPoints()) {
+                auto intAttr = attr.cast<mlir::IntegerAttr>();
+                // Look up the new integer value in `dict` based on the integer key
+                auto newVal = dict[intAttr.getInt()];
+                // Create a new IntegerAttr with the same type but a remapped value
+                mlir::IntegerAttr newIntAttr =
+                        rewriter.getIntegerAttr(intAttr.getType(), newVal);
 
-          succ.pointsAttr(rewriter.getArrayAttr(
-              llvm::ArrayRef<mlir::Attribute>(arr.begin(), arr.end())));
+                // Push back the newIntAttr, which is-a mlir::Attribute
+                arr.push_back(newIntAttr);
+            }
+
+            // Construct an array attribute from the list of Attributes
+            succ.setPointsAttr(rewriter.getArrayAttr(arr));
         }
     }
 
   func.walk([&](mlir::Operation *op) {
 #define MODIFY(OpType)                                                         \
   if (auto sop = llvm::dyn_cast<OpType>(op)) {                                 \
-    sop.starttimeAttr(rewriter.getIntegerAttr(sop.starttimeAttr().getType(),   \
-                                              dict[sop.starttime()]));         \
-    sop.endtimeAttr(rewriter.getIntegerAttr(sop.endtimeAttr().getType(),       \
-                                            dict[sop.endtime()]));             \
+    setStartTimeAttr(sop,dict[getStartTimeAttr(sop)]); \
+    setEndTimeAttr(sop,dict[getEndTimeAttr(sop)]);     \
   }
     MODIFY(tor::AddIOp)
     MODIFY(tor::SubIOp)
@@ -4381,30 +4447,22 @@ void standardizeFunc(mlir::tor::FuncOp func, mlir::PatternRewriter &rewriter) {
 #undef MODIFY
 #define MODIFYSTD(OpType)                                                      \
   if (auto sop = llvm::dyn_cast<OpType>(op)) {                                 \
-    sop->setAttr(                                                              \
-        "starttime",                                                           \
-        rewriter.getIntegerAttr(                                               \
-            sop->getAttr("starttime").getType(),                               \
-            dict[sop->getAttrOfType<IntegerAttr>("starttime").getInt()]));     \
-    sop->setAttr(                                                              \
-        "endtime",                                                             \
-        rewriter.getIntegerAttr(                                               \
-            sop->getAttr("endtime").getType(),                                 \
-            dict[sop->getAttrOfType<IntegerAttr>("endtime").getInt()]));       \
+    setStartTimeAttr(sop,dict[getStartTimeAttr(sop)]); \
+    setEndTimeAttr(sop,dict[getEndTimeAttr(sop)]);     \
   }
     //    MODIFYSTD(CmpFOp)
-    MODIFYSTD(AndOp)
-    MODIFYSTD(OrOp)
-    MODIFYSTD(XOrOp)
-    MODIFYSTD(ShiftLeftOp)
-    MODIFYSTD(SignedShiftRightOp)
-    MODIFYSTD(NegFOp)
-    MODIFYSTD(TruncateIOp)
-    MODIFYSTD(SignExtendIOp)
-    MODIFYSTD(SIToFPOp)
-    MODIFYSTD(FPToSIOp)
-    MODIFYSTD(SelectOp)
-    MODIFYSTD(SignedDivIOp)
+    MODIFYSTD(arith::AndIOp)
+    MODIFYSTD(arith::OrIOp)
+    MODIFYSTD(arith::XOrIOp)
+    MODIFYSTD(arith::ShLIOp)
+    MODIFYSTD(arith::ShRSIOp)
+    MODIFYSTD(arith::NegFOp)
+    MODIFYSTD(arith::TruncIOp)
+    MODIFYSTD(arith::ExtSIOp)
+    MODIFYSTD(arith::SIToFPOp)
+    MODIFYSTD(arith::FPToSIOp)
+    MODIFYSTD(arith::SelectOp)
+    MODIFYSTD(arith::DivSIOp)
 #undef MODIFYSTD
   });
 
@@ -4422,7 +4480,7 @@ int genComponents(mlir::tor::DesignOp design, mlir::PatternRewriter &rewriter,
     if (auto func = llvm::dyn_cast<mlir::tor::FuncOp>(op)) {
       llvm::SmallVector<mlir::hec::ComponentPortInfo, 4> ports;
       ports.clear();
-      auto funcType = func.getType();
+      auto funcType = func.getFunctionType();
 
       size_t icount = 0;
       auto context = func.getContext();
@@ -4462,7 +4520,7 @@ int genComponents(mlir::tor::DesignOp design, mlir::PatternRewriter &rewriter,
   for (auto &op : design->getRegion(0).front())
     if (auto alloc = llvm::dyn_cast<mlir::tor::AllocOp>(op)) {
       glbStorage.add_mem(alloc);
-    } else if (auto constant = llvm::dyn_cast<ConstantOp>(op)) {
+    } else if (auto constant = llvm::dyn_cast<arith::ConstantOp>(op)) {
       glbStorage.add_constant(constant);
     }
 
@@ -4519,10 +4577,10 @@ struct HECGen : public OpRewritePattern<mlir::tor::DesignOp> {
     // torDesign->setAttr("staticPass", rewriter.getI32IntegerAttr(1));
 
     auto hecDesign = rewriter.create<mlir::hec::DesignOp>(torDesign.getLoc(),
-                                                          torDesign.symbol());
+                                                          torDesign.getSymbol());
 
-    if (hecDesign.body().empty())
-      hecDesign.body().push_back(new mlir::Block);
+    if (hecDesign.getBody().empty())
+      hecDesign.getBody().push_back(new mlir::Block);
 
     std::cerr << "Create hec design" << std::endl;
 
@@ -4558,7 +4616,7 @@ struct HECGenPass : public HECGenBase<HECGenPass> {
     if (m.walk([&](tor::DesignOp design) {
            mlir::RewritePatternSet patterns(&getContext());
            patterns.insert<HECGen>(m.getContext());
-           if (failed(applyOpPatternsAndFold(design, std::move(patterns))))
+           if (failed(applyOpPatternsAndFold({design}, std::move(patterns))))
              return WalkResult::advance();
            return WalkResult::advance();
          }).wasInterrupted()) {

@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Visualisation du Scheduling HLS avec Chaînage d'Opérateurs</title>
+    <!-- Charger D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Styles de base */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        /* Conteneur des contrôles */
+        #controls {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        /* Bouton de sélection de fichier */
+        #load-json-btn {
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        /* Input file caché */
+        #file-input {
+            display: none;
+        }
+
+        /* Conteneur du graphique */
+        #gantt-chart {
+            width: 100%;
+            height: 700px;
+            border: 1px solid #ccc;
+            position: relative;
+        }
+
+        /* Styles des tâches */
+        .task {
+            fill: steelblue;
+            stroke: #333;
+            stroke-width: 1px;
+        }
+
+        .task:hover {
+            fill: darkorange;
+        }
+
+        /* Styles des axes */
+        .axis path,
+        .axis line {
+            stroke: #000;
+        }
+
+        /* Styles des dépendances */
+        .dependency {
+            stroke: red;
+            stroke-width: 3px; /* Augmentation de l'épaisseur */
+            fill: none;
+            marker-end: url(#arrow);
+        }
+
+        /* Styles des chaînes */
+        .chain {
+            stroke: green;
+            stroke-width: 3px; /* Augmentation de l'épaisseur */
+            fill: none;
+            marker-end: url(#chain-arrow);
+        }
+
+        /* Styles des tooltips */
+        .tooltip {
+            position: absolute;
+            text-align: left;
+            padding: 8px;
+            font-size: 12px;
+            background: lightsteelblue;
+            border: 1px solid #000;
+            border-radius: 4px;
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        /* Styles des frontières de cycle */
+        .cycle-boundary {
+            stroke: black;
+            stroke-dasharray: 4;
+            stroke-width: 2px; /* Augmentation de l'épaisseur */
+        }
+
+        /* Styles des étiquettes de chaînes */
+        .chain-label {
+            font-size: 14px;
+            font-weight: bold;
+            fill: green;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Visualisation du Scheduling HLS avec Chaînage d'Opérateurs</h1>
+
+<!-- Controles pour le chargement de fichier JSON -->
+<div id="controls">
+    <button id="load-json-btn">Charger un fichier JSON</button>
+    <input type="file" id="file-input" accept=".json">
+</div>
+
+<!-- Conteneur du graphique Gantt -->
+<div id="gantt-chart"></div>
+
+<script>
+    // Initialiser la visualisation en ajoutant les écouteurs d'événements
+    function initVisualization() {
+        const loadJsonBtn = document.getElementById('load-json-btn');
+        const fileInput = document.getElementById('file-input');
+
+        // Écouter le clic sur le bouton pour ouvrir la boîte de dialogue de fichier
+        loadJsonBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Écouter la sélection du fichier
+        fileInput.addEventListener('change', handleFileSelect);
+    }
+
+    // Gérer la sélection du fichier JSON
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (file && file.type === "application/json") {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    renderGanttChart(data);
+                } catch (error) {
+                    alert("Erreur de parsing JSON : " + error.message);
+                }
+            };
+            reader.readAsText(file);
+        } else {
+            alert("Veuillez sélectionner un fichier JSON valide.");
+        }
+    }
+
+    // Fonction principale pour rendre le graphique Gantt
+    function renderGanttChart(data) {
+        // Extraire les données
+        const cycleDurationNs = data.cycle_duration_ns;
+        const tasks = data.tasks;
+        const chains = data.chains;
+
+        // Calculer les temps absolus pour chaque tâche
+        tasks.forEach(task => {
+            task.start_time_ns = calculateStartTime(task, cycleDurationNs);
+            task.end_time_ns = calculateEndTime(task, cycleDurationNs);
+        });
+
+        // Définir les dimensions du graphique
+        const margin = { top: 150, right: 30, bottom: 50, left: 250 };
+        const width = 1400 - margin.left - margin.right;
+        const height = 700 - margin.top - margin.bottom;
+
+        // Supprimer le SVG précédent s'il existe
+        d3.select("#gantt-chart").select("svg").remove();
+
+        // Initialiser le SVG avec zoom et pan
+        const { svg, zoom } = initializeSVG(width, height);
+
+        // Définir les échelles
+        const xScale = defineXScale(tasks, cycleDurationNs, width);
+        const yScale = defineYScale(tasks, height);
+
+        // Rendre les axes
+        renderAxes(svg, xScale, yScale, height);
+
+        // Rendre les frontières de cycle et les étiquettes
+        renderCycleBoundaries(svg, xScale, cycleDurationNs, tasks, height);
+        renderCycleLabels(svg, xScale, cycleDurationNs, tasks);
+
+        // Rendre les tâches
+        renderTasks(svg, tasks, xScale, yScale);
+
+        // Rendre les dépendances
+        renderDependencies(svg, tasks, xScale, yScale);
+
+        // Rendre les chaînes d'opérateurs
+        renderChains(svg, chains, tasks, xScale, yScale);
+    }
+
+    // Calculer le temps de début absolu en ns
+    function calculateStartTime(task, cycleDurationNs) {
+        return task.start_cycle * cycleDurationNs + task.start_offset_ns;
+    }
+
+    // Calculer le temps de fin absolu en ns
+    function calculateEndTime(task, cycleDurationNs) {
+        return (task.start_cycle + task.duration_cycles) * cycleDurationNs + task.end_offset_ns;
+    }
+
+    // Initialiser le SVG avec zoom et pan
+    function initializeSVG(width, height) {
+        const zoomBehavior = d3.zoom()
+            .scaleExtent([0.5, 5])
+            .translateExtent([[-100, -100], [width + 100, height + 100]])
+            .on("zoom", zoomed);
+
+        const svg = d3.select("#gantt-chart")
+            .append("svg")
+            .attr("width", width + 250 + 30) // marge gauche + marge droite
+            .attr("height", height + 150 + 50) // marge supérieure + marge inférieure
+            .call(zoomBehavior)
+            .append("g")
+            .attr("transform", "translate(250,150)"); // marge gauche et supérieure
+
+        // Fonction de zoom
+        function zoomed(event) {
+            svg.attr("transform", event.transform);
+        }
+
+        return { svg, zoom: zoomBehavior };
+    }
+
+    // Définir l'échelle X
+    function defineXScale(tasks, cycleDurationNs, width) {
+        const maxTimeNs = d3.max(tasks, d => d.end_time_ns) + cycleDurationNs;
+        return d3.scaleLinear()
+            .domain([0, maxTimeNs])
+            .range([0, width]);
+    }
+
+    // Définir l'échelle Y
+    function defineYScale(tasks, height) {
+        return d3.scaleBand()
+            .domain(tasks.map(d => d.name))
+            .range([0, height])
+            .padding(0.1);
+    }
+
+    // Rendre les axes X et Y
+    function renderAxes(svg, xScale, yScale, height) {
+        const xAxis = d3.axisBottom(xScale)
+            .tickFormat(d => `${d} ns`)
+            .ticks(10);
+
+        const yAxis = d3.axisLeft(yScale);
+
+        // Ajouter l'axe X
+        svg.append("g")
+            .attr("class", "x axis")
+            .attr("transform", `translate(0, ${height})`)
+            .call(xAxis)
+            .selectAll("text")
+            .attr("transform", "rotate(-45)")
+            .style("text-anchor", "end");
+
+        // Ajouter l'axe Y
+        svg.append("g")
+            .attr("class", "y axis")
+            .call(yAxis);
+    }
+
+    // Rendre les frontières de cycle
+    function renderCycleBoundaries(svg, xScale, cycleDurationNs, tasks, height) {
+        const maxCycle = d3.max(tasks, d => d.start_cycle + d.duration_cycles) + 1;
+
+        for (let i = 0; i <= maxCycle; i++) {
+            svg.append("line")
+                .attr("class", "cycle-boundary")
+                .attr("x1", xScale(i * cycleDurationNs))
+                .attr("y1", 0)
+                .attr("x2", xScale(i * cycleDurationNs))
+                .attr("y2", height);
+        }
+    }
+
+    // Rendre les étiquettes de cycle
+    function renderCycleLabels(svg, xScale, cycleDurationNs, tasks) {
+        const maxCycle = d3.max(tasks, d => d.start_cycle + d.duration_cycles) + 1;
+
+        svg.selectAll(".cycle-label")
+            .data(d3.range(0, maxCycle + 1))
+            .enter()
+            .append("text")
+            .attr("class", "cycle-label")
+            .attr("x", d => xScale(d * cycleDurationNs))
+            .attr("y", -10)
+            .attr("text-anchor", "middle")
+            .text(d => `Cycle ${d}`);
+    }
+
+    // Initialiser le tooltip
+    function initializeTooltip() {
+        return d3.select("body").append("div")
+            .attr("class", "tooltip");
+    }
+
+    // Afficher le tooltip
+    function showTooltip(event, d, tooltip) {
+        tooltip.transition()
+            .duration(200)
+            .style("opacity", .9);
+        tooltip.html(
+            `<strong>${d.name}</strong><br/>
+                 Début: Cycle ${d.start_cycle}, Offset ${d.start_offset_ns} ns (${d.start_time_ns} ns)<br/>
+                 Fin: Cycle ${d.start_cycle + d.duration_cycles}, Offset ${d.end_offset_ns} ns (${d.end_time_ns} ns)<br/>
+                 Progression: ${d.progress}%`
+        )
+            .style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 28) + "px");
+    }
+
+    // Déplacer le tooltip avec la souris
+    function moveTooltip(event, tooltip) {
+        tooltip.style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 28) + "px");
+    }
+
+    // Cacher le tooltip
+    function hideTooltip(tooltip) {
+        tooltip.transition()
+            .duration(500)
+            .style("opacity", 0);
+    }
+
+    // Rendre les tâches
+    function renderTasks(svg, tasks, xScale, yScale) {
+        const tooltip = initializeTooltip();
+
+        // Définir les marqueurs flèches
+        defineMarkers(svg);
+
+        // Rendre les rectangles des tâches
+        svg.selectAll(".task")
+            .data(tasks)
+            .enter()
+            .append("rect")
+            .attr("class", d => d.chain ? `task ${d.chain}` : 'task')
+            .attr("x", d => xScale(d.start_time_ns))
+            .attr("y", d => yScale(d.name))
+            .attr("width", d => xScale(d.end_time_ns) - xScale(d.start_time_ns))
+            .attr("height", yScale.bandwidth())
+            .on("mouseover", (event, d) => showTooltip(event, d, tooltip))
+            .on("mousemove", (event) => moveTooltip(event, tooltip))
+            .on("mouseout", () => hideTooltip(tooltip));
+    }
+
+    // Définir les marqueurs flèches
+    function defineMarkers(svg) {
+        // Marqueur flèche pour les dépendances
+        svg.append("defs").append("marker")
+            .attr("id", "arrow")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 10)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "red");
+
+        // Marqueur flèche pour les chaînes
+        svg.append("defs").append("marker")
+            .attr("id", "chain-arrow")
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 10)
+            .attr("refY", 0)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("path")
+            .attr("d", "M0,-5L10,0L0,5")
+            .attr("fill", "green");
+    }
+
+    // Rendre les dépendances
+    function renderDependencies(svg, tasks, xScale, yScale) {
+        tasks.forEach(task => {
+            if (task.dependencies) {
+                task.dependencies.forEach(depId => {
+                    const depTask = tasks.find(t => t.id === depId);
+                    if (depTask) {
+                        const sourceX = xScale(depTask.end_time_ns);
+                        const sourceY = yScale(depTask.name) + yScale.bandwidth() / 2;
+                        const targetX = xScale(task.start_time_ns);
+                        const targetY = yScale(task.name) + yScale.bandwidth() / 2;
+
+                        // Dessiner une ligne courbée avec une flèche de la tâche dépendante à la tâche actuelle
+                        svg.append("path")
+                            .attr("class", "dependency")
+                            .attr("d", `M${sourceX},${sourceY} C${sourceX + 20},${sourceY} ${targetX - 20},${targetY} ${targetX},${targetY}`)
+                            .attr("marker-end", "url(#arrow)");
+                    }
+                });
+            }
+        });
+    }
+
+    // Rendre les chaînes d'opérateurs
+    function renderChains(svg, chains, tasks, xScale, yScale) {
+        chains.forEach(chain => {
+            // Filtrer les tâches dans la chaîne actuelle
+            const chainTasks = tasks.filter(d => d.chain === chain.id);
+
+            if (chainTasks.length > 0) {
+                // Calculer la position Y pour l'étiquette de la chaîne
+                const chainY = yScale(chainTasks[0].name) - 30;
+
+                // Dessiner l'étiquette de la chaîne
+                svg.append("text")
+                    .attr("class", "chain-label")
+                    .attr("x", 0)
+                    .attr("y", chainY)
+                    .attr("text-anchor", "start")
+                    .text(chain.name);
+
+                // Dessiner les lignes de chaînage entre les tâches
+                for (let i = 0; i < chainTasks.length - 1; i++) {
+                    const currentTask = chainTasks[i];
+                    const nextTask = chainTasks[i + 1];
+
+                    const sourceX = xScale(currentTask.end_time_ns);
+                    const sourceY = yScale(currentTask.name) + yScale.bandwidth() / 2;
+                    const targetX = xScale(nextTask.start_time_ns);
+                    const targetY = yScale(nextTask.name) + yScale.bandwidth() / 2;
+
+                    // Dessiner une ligne courbée avec une flèche de la tâche actuelle à la tâche suivante dans la chaîne
+                    svg.append("path")
+                        .attr("class", `chain ${chain.id}`)
+                        .attr("d", `M${sourceX},${sourceY} C${sourceX + 30},${sourceY - 20} ${targetX - 30},${targetY - 20} ${targetX},${targetY}`)
+                        .attr("marker-end", "url(#chain-arrow)");
+                }
+            }
+        });
+    }
+
+    // Initialiser le tooltip
+    const tooltip = initializeTooltip();
+
+    // Fonction pour initialiser le tooltip
+    function initializeTooltip() {
+        return d3.select("body").append("div")
+            .attr("class", "tooltip");
+    }
+
+    // Fonction pour afficher le tooltip
+    function showTooltip(event, d, tooltip) {
+        tooltip.transition()
+            .duration(200)
+            .style("opacity", .9);
+        tooltip.html(
+            `<strong>${d.name}</strong><br/>
+                 Début: Cycle ${d.start_cycle}, Offset ${d.start_offset_ns} ns (${d.start_time_ns} ns)<br/>
+                 Fin: Cycle ${d.start_cycle + d.duration_cycles}, Offset ${d.end_offset_ns} ns (${d.end_time_ns} ns)<br/>
+                 Progression: ${d.progress}%`
+        )
+            .style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 28) + "px");
+    }
+
+    // Fonction pour déplacer le tooltip avec la souris
+    function moveTooltip(event, tooltip) {
+        tooltip.style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 28) + "px");
+    }
+
+    // Fonction pour cacher le tooltip
+    function hideTooltip(tooltip) {
+        tooltip.transition()
+            .duration(500)
+            .style("opacity", 0);
+    }
+
+    // Lancer l'initialisation lors du chargement de la page
+    document.addEventListener('DOMContentLoaded', initVisualization);
+</script>
+</body>
+</html>

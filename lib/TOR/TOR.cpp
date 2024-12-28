@@ -3,11 +3,16 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/FunctionImplementation.h"
+#include "mlir/Interfaces/FunctionImplementation.h"    // for function_interface_impl
+//#include "mlir/Dialect/Func/IR/FunctionImplementation.h"
+
 #include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
+
+#include "TOR/TOR.cpp.inc"
+#include "TOR/TOR.h.inc"
 
 using namespace mlir;
 using namespace tor;
@@ -16,6 +21,41 @@ static LogicalResult verifyDesignOp(tor::DesignOp op)
 {
   // TODO: check the existance of a `main` func
   return success();
+}
+
+//LogicalResult tor::DesignOp::verify()
+//{
+//    // TODO: check the existance of a `main` func
+//    return success();
+//}
+
+LogicalResult tor::CallOp::verify()
+{
+    // TODO: check the existance of a `main` func
+    return success();
+}
+// Lookup a symbol referenced by MyCallOp
+LogicalResult tor::CallOp::verifySymbolUses(::mlir::SymbolTableCollection &symbolTable) {
+    // Assuming 'op' is an instance of MyCallOp
+    FlatSymbolRefAttr callee = getCalleeAttr();
+
+    // Resolve the symbol reference to its definition
+    auto sym = symbolTable.lookupNearestSymbolFrom(getOperation(), callee);
+    if (!sym) {
+        return emitOpError("callee '") << callee.getRootReference()
+                                       << "' not found in symbol table";
+    }
+
+    // Optionally, verify that the resolved symbol is of the expected type
+    // For example, ensure it's a function operation
+    if (!sym->hasTrait<::mlir::detail::FunctionOpInterfaceTrait>()) {
+        return emitOpError("callee '") << callee.getRootReference()
+                                       << "' is not a function";
+    }
+
+    return success();
+
+
 }
 
 void tor::AddIOp::build(OpBuilder &odsBuilder,
@@ -66,45 +106,86 @@ void tor::FuncOp::build(::mlir::OpBuilder &odsBuilder,
 {
   odsState.addAttribute(SymbolTable::getSymbolAttrName(),
                         odsBuilder.getStringAttr(name));
-  odsState.addAttribute(getTypeAttrName(), TypeAttr::get(type));
+  odsState.addAttribute("function_type", TypeAttr::get(type));
   odsState.attributes.append(attrs.begin(), attrs.end());
   odsState.addRegion();
 }
 
-static void print(::mlir::OpAsmPrinter &p, tor::FuncOp op)
+ void FuncOp::print(::mlir::OpAsmPrinter &p)
 {
-  FunctionType funcType = op.getType();
-  mlir::impl::printFunctionLikeOp(p, op, funcType.getInputs(), true,
-                                  funcType.getResults());
-  //p.printOptionalAttrDict(op->getAttrs());
+  FunctionType funcType = getFunctionType();
+
+    // Define the names of the attributes
+
+    auto op = this->getOperation();
+    StringRef typeAttrName = "function_type";
+    StringAttr argAttrsName = op->getAttrOfType<StringAttr>("arg_attrs");
+    StringAttr resAttrsName = op->getAttrOfType<StringAttr>("res_attrs");
+
+    function_interface_impl::printFunctionSignature(
+            p,                  // OpAsmPrinter &
+            *this,                 // Operation *
+            funcType.getInputs(),    // ArrayRef<Type> for argument types
+            /*isVariadic=*/true,     // bool
+            funcType.getResults()    // ArrayRef<Type> for result types
+            // Optionally: argument attrs, result attrs, custom printing callbacks...
+    );
+
+    p.printRegion(this->getRegion());
+
+
+  //mlir::function_interface_impl::printFunctionOp(p, *this, true, typeAttrName, argAttrsName,resAttrsName);
+ p.printOptionalAttrDict(this->getOperation()->getAttrs(), {"name"});
+
 }
 
-static ::mlir::ParseResult parseFuncOp(::mlir::OpAsmParser &parser,
-                                       ::mlir::OperationState &result)
-{
-  auto buildFuncType = [](Builder &builder, ArrayRef<Type> argTypes,
-                          ArrayRef<Type> results, mlir::impl::VariadicFlag,
-                          std::string &)
-  {
-    return builder.getFunctionType(argTypes, results);
-  };
-  if (mlir::impl::parseFunctionLikeOp(parser, result, true, buildFuncType))
-    return failure();
-  // Parse the optional attribute list.
-  if (parser.parseOptionalAttrDict(result.attributes))
-    return failure();
-  return success();
+::mlir::ParseResult FuncOp::parse(::mlir::OpAsmParser &parser,
+                                  ::mlir::OperationState &result) {
+    // This lambda builds a FunctionType from a list of arg/result Types.
+    auto buildFuncType = [](Builder &builder,
+                            ArrayRef<Type> argTypes,
+                            ArrayRef<Type> resTypes,
+                            function_interface_impl::VariadicFlag /*unused*/,
+                            std::string & /*unused*/) -> FunctionType {
+        return builder.getFunctionType(argTypes, resTypes);
+    };
+
+    // Provide the attribute names parseFunctionOp needs:
+    // - The name of the function-type attribute (e.g. "function_type")
+    // - The attribute names for arg- and result-attrs (if you want to support them)
+    auto &b = parser.getBuilder();
+    StringAttr typeAttrName = b.getStringAttr("function_type");
+    StringAttr argAttrsName = b.getStringAttr("arg_attrs");
+    StringAttr resAttrsName = b.getStringAttr("res_attrs");
+
+    // Now call parseFunctionOp with all needed arguments.
+    if (failed(function_interface_impl::parseFunctionOp(
+            parser,
+            result,
+            /*allowVariadic=*/true,
+            /*typeAttrName=*/typeAttrName,
+            /*funcTypeBuilder=*/buildFuncType,
+            /*argAttrsName=*/argAttrsName,
+            /*resAttrsName=*/resAttrsName))) {
+        return failure();
+    }
+
+    // Optionally parse trailing attributes (if your dialect supports them).
+    if (parser.parseOptionalAttrDict(result.attributes))
+        return failure();
+
+    return success();
 }
 
-static ::mlir::LogicalResult verifyFuncOp(tor::FuncOp op)
+::mlir::LogicalResult FuncOp::verify()
 {
-  auto fnInputTypes = op.getType().getInputs();
-  Block &entryBlock = op.front();
+  auto fnInputTypes = getFunctionType().getInputs();
+  Block &entryBlock = front();
 
   for (unsigned i = 0, e = entryBlock.getNumArguments(); i != e; ++i)
   {
     if (fnInputTypes[i] != entryBlock.getArgument(i).getType())
-      return op.emitOpError("type of entry block argument #")
+      return emitOpError("type of entry block argument #")
              << i << '(' << entryBlock.getArgument(i).getType()
              << ") must match the type of the corresponding argument in "
              << "module signature(" << fnInputTypes[i] << ')';
@@ -112,26 +193,26 @@ static ::mlir::LogicalResult verifyFuncOp(tor::FuncOp op)
   return success();
 }
 
-static void print(OpAsmPrinter &p, tor::ReturnOp op)
+void ReturnOp::print(OpAsmPrinter &p)
 {
   p << "tor.return";
-  if (op.getNumOperands() != 0)
+  if (getNumOperands() != 0)
   {
     p << ' ';
-    p.printOperands(op.getOperands());
+    p.printOperands(getOperands());
   }
   /*
-  p << " at " << op.time();*/
-  if (op.getNumOperands() != 0)
+  p << " at " << time();*/
+  if (getNumOperands() != 0)
   {
     p << " : ";
-    interleaveComma(op.getOperandTypes(), p);
+    interleaveComma(getOperandTypes(), p);
   }
 }
 
-static ParseResult parseReturnOp(OpAsmParser &parser, OperationState &result)
+ParseResult ReturnOp::parse(OpAsmParser &parser, OperationState &result)
 {
-  SmallVector<OpAsmParser::OperandType, 1> opInfo;
+  SmallVector<OpAsmParser::UnresolvedOperand, 1> opInfo;
   SmallVector<Type, 1> types;
   ::mlir::IntegerAttr timeAttr;
   llvm::SMLoc loc = parser.getCurrentLocation();
@@ -144,49 +225,48 @@ static ParseResult parseReturnOp(OpAsmParser &parser, OperationState &result)
                  parser.resolveOperands(opInfo, types, loc, result.operands));
 }
 
-static LogicalResult verifyReturnOp(tor::ReturnOp op)
+LogicalResult ReturnOp::verify()
 {
-  return success();
-  auto *parent = op->getParentOp();
+  auto parent = getParentOp();
 
   StringRef parentName = parent->getName().getStringRef();
 
   if (parentName.equals(StringRef("tor.func")))
   {
-    auto function = dyn_cast<tor::FuncOp>(parent);
+    auto function = dyn_cast<tor::FuncOp>(&parent);
     // if (!function)
-    //   return op.emitOpError("must have a handshake.func parent");
+    //   return emitOpError("must have a handshake.func parent");
 
     // The operand number and types must match the function signature.
-    const auto &results = function.getType().getResults();
-    if (op.getNumOperands() != results.size())
-      return op.emitOpError("has ")
-             << op.getNumOperands()
+    const auto &results = function->getResultTypes();
+    if (getNumOperands() != results.size())
+      return emitOpError("has ")
+             << getNumOperands()
              << " operands, but enclosing function returns " << results.size();
 
     for (unsigned i = 0, e = results.size(); i != e; ++i)
-      if (op.getOperand(i).getType() != results[i])
-        return op.emitError()
+      if (getOperand(i).getType() != results[i])
+        return emitError()
                << "type of return operand " << i << " ("
-               << op.getOperand(i).getType()
+               << getOperand(i).getType()
                << ") doesn't match function result type (" << results[i] << ")";
 
     return success();
   }
-  return op.emitOpError("must have a tor.func or tor.module parent");
+  return emitOpError("must have a tor.func or tor.module parent");
 }
 
-static void print(OpAsmPrinter &p, TimeGraphOp op)
+ void TimeGraphOp::print(OpAsmPrinter &p)
 {
 
-  p << TimeGraphOp::getOperationName() << " (" << op.starttime() << " to " << op.endtime() << ")";
+  p << TimeGraphOp::getOperationName() << " (" << getStarttime() << " to " << getEndtime() << ")";
 
-  p.printRegion(op.region(),
+  p.printRegion(getRegion(),
                 /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/false);
 }
 
-static ParseResult parseTimeGraphOp(OpAsmParser &parser, OperationState &result)
+ParseResult TimeGraphOp::parse(OpAsmParser &parser, OperationState &result)
 {
   result.regions.reserve(1);
   Region *region = result.addRegion();
@@ -194,7 +274,7 @@ static ParseResult parseTimeGraphOp(OpAsmParser &parser, OperationState &result)
   ::mlir::IntegerAttr starttime;
   ::mlir::IntegerAttr endtime;
 
-  OpAsmParser::OperandType cond;
+  OpAsmParser::UnresolvedOperand cond;
 
   if (/*parser.parseKeyword("on") || */ parser.parseLParen() ||
       parser.parseAttribute(starttime,
@@ -219,42 +299,41 @@ static ParseResult parseTimeGraphOp(OpAsmParser &parser, OperationState &result)
   return success();
 }
 
-static LogicalResult verifyStartTimeOp(tor::StartTimeOp op)
-{
-  return success();
-}
+//LogicalResult StartTimeOp::verify()
+//{
+//  return success();
+//}
+//
+// LogicalResult EndTimeOp::verify()
+//{
+//  return success();
+//}
+//
+//LogicalResult SuccTimeOp::verify()
+//{
+//  return success();
+//}
 
-static LogicalResult verifyEndTimeOp(tor::EndTimeOp op)
-{
-  return success();
-}
-
-static LogicalResult verifySuccTimeOp(tor::SuccTimeOp op)
-{
-  return success();
-  // TODO check the equal length
-}
-
-static void print(OpAsmPrinter &p, IfOp op)
+void IfOp::print(OpAsmPrinter &p)
 {
   bool printBlockTerminators = false;
 
-  p << IfOp::getOperationName() << " " << op.condition()
-    << " on (" << op.starttime() << " to " << op.endtime() << ")";
+  p << IfOp::getOperationName() << " " << getCondition()
+    << " on (" << getStarttime() << " to " << getEndtime() << ")";
 
-  if (!op.results().empty())
+  if (!getResults().empty())
   {
-    p << " -> (" << op.getResultTypes() << ")";
+    p << " -> (" << getResultTypes() << ")";
     printBlockTerminators = true;
   }
 
   p << " then";
 
-  p.printRegion(op.thenRegion(),
+  p.printRegion(getThenRegion(),
                 /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/printBlockTerminators);
 
-  auto &elseRegion = op.elseRegion();
+  auto &elseRegion = getElseRegion();
 
   if (!elseRegion.empty())
   {
@@ -264,10 +343,10 @@ static void print(OpAsmPrinter &p, IfOp op)
                   /*printBlockTerminators=*/printBlockTerminators);
   }
 
-  p.printOptionalAttrDict(op->getAttrs(), {"starttime", "endtime"});
+  p.printOptionalAttrDict(getOperation()->getAttrs(), {"starttime", "endtime"});
 }
 
-static ParseResult parseIfOp(OpAsmParser &parser, OperationState &result)
+ParseResult IfOp::parse(OpAsmParser &parser, OperationState &result)
 {
   result.regions.reserve(2);
   Region *thenRegion = result.addRegion();
@@ -277,7 +356,7 @@ static ParseResult parseIfOp(OpAsmParser &parser, OperationState &result)
   ::mlir::IntegerAttr endtime;
 
   auto &builder = parser.getBuilder();
-  OpAsmParser::OperandType cond;
+  OpAsmParser::UnresolvedOperand cond;
 
   Type i1Type = builder.getIntegerType(1);
   if (parser.parseOperand(cond) ||
@@ -325,12 +404,12 @@ static ParseResult parseIfOp(OpAsmParser &parser, OperationState &result)
 
   return success();
 }
-
-static LogicalResult verifyIfOp(IfOp op)
+/*
+ LogicalResult IfOp::verify()
 {
   return success();
 }
-
+*/
 void tor::ForOp::build(OpBuilder &builder, OperationState &result, Value lb,
                         Value ub, Value step,
                         IntegerAttr starttime, IntegerAttr endtime,
@@ -366,35 +445,36 @@ static void printInitializationList(OpAsmPrinter &p,
   p << ")";
 }
 
-static void print(OpAsmPrinter &p, tor::ForOp op)
+void ForOp::print(OpAsmPrinter &p)
 {
-  p << op.getOperationName() << " " << op.getInductionVar() << " = "
-    << "(" << op.lowerBound() << " : " << op.lowerBound().getType() << ")"
+  p << getOperationName() << " " << getInductionVar() << " = "
+    << "(" << getLowerBound() << " : " << getLowerBound().getType() << ")"
     << " to " 
-    << "(" << op.upperBound() << " : " << op.upperBound().getType() << ")" 
-    << " step " << "(" << op.step() << " : " << op.step().getType() << ")";
+    << "(" << getUpperBound() << " : " << getUpperBound().getType() << ")" 
+    << " step " << "(" << getStep() << " : " << getStep().getType() << ")";
 
   p.printNewline();
-  p << "on (" << op.starttime() << " to " << op.endtime() << ")";
+  p << "on (" << getStarttime() << " to " << getEndtime() << ")";
 
-  printInitializationList(p, op.getRegionIterArgs(), op.getIterOperands(), " iter_args");
+  printInitializationList(p, getRegionIterArgs(), getIterOperands(), " iter_args");
 
-  if (!op.getIterOperands().empty())
-    p << " -> (" << op.getIterOperands().getTypes() << ")";
-  p.printRegion(op.region(),
+  if (!getIterOperands().empty())
+    p << " -> (" << getIterOperands().getTypes() << ")";
+  p.printRegion(getRegion(),
                 /*printEntryBlockArgs=*/false,
-                /*printBlockTerminators=*/op.hasIterOperands());
-  p.printOptionalAttrDict(op->getAttrs(), {"starttime", "endtime"});
+                /*printBlockTerminators=*/hasIterOperands());
+  p.printOptionalAttrDict(this->getOperation()->getAttrs(), {"starttime", "endtime"});
 }
 
-static ParseResult parseForOp(OpAsmParser &parser, OperationState &result)
+ ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result)
 {
   auto &builder = parser.getBuilder();
-  OpAsmParser::OperandType inductionVariable, lb, ub, step;
+  OpAsmParser::Argument inductionVariable;
+  OpAsmParser::UnresolvedOperand lb, ub, step;
   ::mlir::IntegerAttr starttime, endtime;
 
   // Parse the induction variable followed by '='.
-  if (parser.parseRegionArgument(inductionVariable) || parser.parseEqual())
+  if (parser.parseArgument(inductionVariable) || parser.parseEqual())
     return failure();
 
   // Parse loop bounds.
@@ -443,8 +523,10 @@ static ParseResult parseForOp(OpAsmParser &parser, OperationState &result)
     return failure();
 
   // Parse the optional initial iteration arguments.
-  SmallVector<OpAsmParser::OperandType, 4> regionArgs, operands;
-  SmallVector<Type, 4> argTypes;
+    SmallVector<OpAsmParser::UnresolvedOperand, 4>  operands;
+    SmallVector<OpAsmParser::Argument, 4> regionArgs;
+
+      SmallVector<Type, 4> argTypes;
   regionArgs.push_back(inductionVariable);
 
   if (succeeded(parser.parseOptionalKeyword("iter_args")))
@@ -474,7 +556,7 @@ static ParseResult parseForOp(OpAsmParser &parser, OperationState &result)
         parser.getNameLoc(),
         "mismatch in number of loop-carried values and defined values");
 
-  if (parser.parseRegion(*body, regionArgs, argTypes))
+  if (parser.parseRegion(*body, regionArgs, false))
     return failure();
 
   tor::ForOp::ensureTerminator(*body, builder, result.location);
@@ -490,31 +572,32 @@ static LogicalResult verifyForOp(tor::ForOp op)
   return success();
 }
 
-static void print(OpAsmPrinter &p, tor::WhileOp op)
+void WhileOp::print(OpAsmPrinter &p)
 {
 
-  p << op.getOperationName();
-  printInitializationList(p, op.before().front().getArguments(), op.inits(),
+  p << getOperationName();
+  printInitializationList(p, getBefore().front().getArguments(), getInits(),
                           " ");
   p.printNewline();
-  p << "on (" << op.starttime() << " to " << op.endtime() << ")";
+  p << "on (" << getStarttime() << " to " << getEndtime() << ")";
   p << " : ";
-  p.printFunctionalType(op.inits().getTypes(), op.results().getTypes());
-  p.printRegion(op.before(), /*printEntryBlockArgs=*/false);
+  p.printFunctionalType(getInits().getTypes(), getResults().getTypes());
+  p.printRegion(getBefore(), /*printEntryBlockArgs=*/false);
   p << " do";
-  p.printRegion(op.after());
-  p.printOptionalAttrDictWithKeyword(op->getAttrs(), {"starttime", "endtime"});
+  p.printRegion(getAfter());
+    p.printOptionalAttrDict(getOperation()->getAttrs(), {"starttime", "endtime"});
 }
 
-static ParseResult parseWhileOp(OpAsmParser &parser, OperationState &result)
+ParseResult WhileOp::parse(OpAsmParser &parser, OperationState &result)
 {
-  SmallVector<OpAsmParser::OperandType, 4> regionArgs, operands;
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> operands;
+    SmallVector<OpAsmParser::Argument, 4> regionArgs;
   Region *before = result.addRegion();
   Region *after = result.addRegion();
 
   OptionalParseResult listResult =
       parser.parseOptionalAssignmentList(regionArgs, operands);
-  if (listResult.hasValue() && failed(listResult.getValue()))
+  if (listResult.has_value() && failed(listResult.value()))
     return failure();
 
   ::mlir::IntegerAttr starttime, endtime;
@@ -553,7 +636,7 @@ static ParseResult parseWhileOp(OpAsmParser &parser, OperationState &result)
     return failure();
 
   return failure(
-      parser.parseRegion(*before, regionArgs, functionType.getInputs()) ||
+      parser.parseRegion(*before, regionArgs, false) ||
       parser.parseKeyword("do") || parser.parseRegion(*after) ||
       parser.parseOptionalAttrDictWithKeyword(result.attributes));
 }
@@ -567,13 +650,13 @@ static LogicalResult verifyTypeRangesMatch(OpTy op, TypeRange left,
                                            size_t rbias, StringRef message)
 {
   if (left.size() + lbias != right.size() + rbias)
-    return op.emitOpError("expects the same number of ") << message;
+    return op.emitError("expects the same number of ") << message;
 
   for (unsigned i = 0, e = left.size(); i + lbias < e; ++i)
   {
     if (left[i + lbias] != right[i + rbias])
     {
-      InFlightDiagnostic diag = op.emitOpError("expects the same types for ")
+      InFlightDiagnostic diag = op.emitError("expects the same types for ")
                                 << message;
       diag.attachNote() << "for argument " << i << ", found " << left[i + lbias]
                         << " and " << right[i + rbias];
@@ -585,46 +668,48 @@ static LogicalResult verifyTypeRangesMatch(OpTy op, TypeRange left,
 }
 
 /// Verifies that the first block of the given `region` is terminated by a
-/// CYieldOp. Reports errors on the given operation if it is not the case.
+/// `TerminatorTy`. Reports errors on the given operation if it is not the case.
 template <typename TerminatorTy>
 static TerminatorTy verifyAndGetTerminator(tor::WhileOp op, Region &region,
-                                           StringRef errorMessage)
-{
-  Operation *terminatorOperation = region.front().getTerminator();
-  if (auto yield = dyn_cast_or_null<TerminatorTy>(terminatorOperation))
-    return yield;
+                                           StringRef errorMessage) {
+    Operation *terminatorOperation = region.front().getTerminator();
+    if (auto yield = dyn_cast_or_null<TerminatorTy>(terminatorOperation))
+        return yield;
 
-  auto diag = op.emitOpError(errorMessage);
-  if (terminatorOperation)
-    diag.attachNote(terminatorOperation->getLoc()) << "terminator here";
-  return nullptr;
+    // Emit an error on the `op` itself, rather than calling a free function.
+    auto diag = op.emitOpError() << errorMessage;
+    if (terminatorOperation)
+        diag.attachNote(terminatorOperation->getLoc())
+                << "terminator here";
+
+    // Return nullptr for a failed cast (assuming TerminatorTy is a pointer-like type).
+    return nullptr;
 }
 
-static LogicalResult verifyWhileOp(tor::WhileOp op)
-{
+LogicalResult WhileOp::verify() {
   // if (failed(RegionBranchOpInterface::verifyTypes(op)))
   //   return failure();
 
   auto beforeTerminator = verifyAndGetTerminator<tor::ConditionOp>(
-      op, op.before(),
+      *this, getBefore(),
       "expects the 'before' region to terminate with 'tor.condition'");
   if (!beforeTerminator)
     return failure();
 
-  TypeRange trailingTerminatorOperands = beforeTerminator.args().getTypes();
-  if (failed(verifyTypeRangesMatch(op, trailingTerminatorOperands,
-                                   op.after().getArgumentTypes(), 0, 0,
+  TypeRange trailingTerminatorOperands = beforeTerminator.getArgs().getTypes();
+  if (failed(verifyTypeRangesMatch(*this, trailingTerminatorOperands,
+                                   getAfter().getArgumentTypes(), 0, 0,
                                    "trailing operands of the 'before' block "
                                    "terminator and 'after' region arguments")))
     return failure();
 
   if (failed(verifyTypeRangesMatch(
-          op, trailingTerminatorOperands, op.getResultTypes(), 0, 0,
+          *this, trailingTerminatorOperands, getResultTypes(), 0, 0,
           "trailing operands of the 'before' block terminator and op results")))
     return failure();
 
   auto afterTerminator = verifyAndGetTerminator<tor::YieldOp>(
-      op, op.after(),
+      *this, getAfter(),
       "expects the 'after' region to terminate with 'tor.yield'");
   return success(afterTerminator != nullptr);
 }

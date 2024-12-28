@@ -1,24 +1,24 @@
 #include "HEC/PassDetail.h"
-#include "mlir/Analysis/Utils.h"
+//#include "mlir/Analysis/Utils.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+//#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "HEC/HEC.h"
 #include "HEC/HECDialect.h"
 
 #include "mlir/Pass/Pass.h"
-#include "mlir/IR/BlockAndValueMapping.h"
+//#include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/PatternMatch.h"
 #include <mlir/Transforms/DialectConversion.h>
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/Utils.h"
+//#include "mlir/Transforms/Utils.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include <map>
@@ -80,7 +80,7 @@ namespace mlir {
 
         string get_name(Value val) {
             if (val.getDefiningOp()) {
-                if (auto constantOp = dyn_cast<ConstantOp>(val.getDefiningOp())) {
+                if (auto constantOp = dyn_cast<mlir::arith::ConstantOp>(val.getDefiningOp())) {
                     string name = "";
                     //                    llvm::raw_string_ostream out(name);
                     //                    constantOp.getValue().print(out);
@@ -96,7 +96,9 @@ namespace mlir {
 //                        for (auto cr : float_num) {
 //                            name += cr;
 //                        }
-                        name += float_attr.getValue().bitcastToAPInt().toString(10, false);
+
+
+                        name += toString(float_attr.getValue().bitcastToAPInt(),10,false);
                         name += "L.U";
                     } else if (auto bool_attr = attr.dyn_cast<BoolAttr>()) {
                         name += std::to_string(bool_attr.getValue()) + ".B";
@@ -172,7 +174,7 @@ namespace mlir {
         }
 
         string getName(hec::CmpIOp cmpIOp) {
-            string type = get(cmpIOp.typeAttr().getValue());
+            string type = get(cmpIOp.getType());
             if (type == "sle") {
                 return " <= ";
             } else if (type == "slt") {
@@ -194,10 +196,10 @@ namespace mlir {
 
         void
         insert_arithmetic_primitive(string &chisel_component, hec::PrimitiveOp &primitive, hec::ComponentOp &comp, bool stall = false) {
-            string moduleName = get(primitive.instanceName());
+            string moduleName = get(primitive.getInstanceName());
             chisel_component += "\tval " + moduleName + " = Module(new ";
             //Fixme : Consider about integer width in primitive operations
-            string primName = get(primitive.primitiveName());
+            string primName = get(primitive.getPrimitiveName());
             if (primName == "add_integer") {
                 chisel_component += "AddI()";
             } else if (primName == "sub_integer") {
@@ -282,7 +284,7 @@ namespace mlir {
                     chisel_component += "AddSubFBase(8, 8, 24, false)";
                 }
             } else {
-                std::cerr << get(primitive.primitiveName()) << std::endl;
+                std::cerr << get(primitive.getPrimitiveName()) << std::endl;
                 assert(false && "Unknown primitive operation");
             }
             chisel_component += ")\n";
@@ -322,41 +324,41 @@ namespace mlir {
 
 #define insert_bitwise_operation(chisel, TYPE, OPTYPE) \
             if (auto orOp = dyn_cast<TYPE>(op)) {\
-                if (orOp.guard() == Value()) {\
-                    chisel += tab + "val " + get_name(orOp.res());\
-                    chisel += " = " + get_name(orOp.lhs());\
-                    chisel += OPTYPE + get_name(orOp.rhs()) + "\n";\
+                if (orOp.getGuard() == Value()) {\
+                    chisel += tab + "val " + get_name(orOp.getRes());\
+                    chisel += " = " + get_name(orOp.getLhs());\
+                    chisel += OPTYPE + get_name(orOp.getRhs()) + "\n";\
                 } else {\
-                    chisel += tab + "val " + get_name(orOp.res());\
-                    chisel += " = Wire(" + getType(orOp.res().getType()) + ")\n";\
-                    chisel += tab + get_name(orOp.res()) + " := DontCare\n";\
-                    chisel += tab + "when (" + get_bool_name(orOp.guard()) + ") {\n";\
-                    chisel += tab + "\t" + get_name(orOp.res());\
-                    chisel += " := " + get_name(orOp.lhs());\
-                    chisel += OPTYPE + get_name(orOp.rhs()) + "\n";\
+                    chisel += tab + "val " + get_name(orOp.getRes());\
+                    chisel += " = Wire(" + getType(orOp.getRes().getType()) + ")\n";\
+                    chisel += tab + get_name(orOp.getRes()) + " := DontCare\n";\
+                    chisel += tab + "when (" + get_bool_name(orOp.getGuard()) + ") {\n";\
+                    chisel += tab + "\t" + get_name(orOp.getRes());\
+                    chisel += " := " + get_name(orOp.getLhs());\
+                    chisel += OPTYPE + get_name(orOp.getRhs()) + "\n";\
                     chisel += tab + "}\n";\
                 }\
             }
 
         void insert_arithmetic_op(string &chisel_code, string &tab, Operation *op) {
-            if (auto constant = dyn_cast<ConstantOp>(op)) {
+            if (auto constant = dyn_cast<mlir::arith::ConstantOp>(op)) {
             } else if (auto cmpIOp = dyn_cast<hec::CmpIOp>(op)) {
-                if (cmpIOp.guard() == Value()) {
-                    chisel_code += tab + "val " + get_name(cmpIOp.res());
-                    chisel_code += " = " + get_name(cmpIOp.lhs());
-                    chisel_code += getName(cmpIOp) + get_name(cmpIOp.rhs()) + "\n";
+                if (cmpIOp.getGuard() == Value()) {
+                    chisel_code += tab + "val " + get_name(cmpIOp.getRes());
+                    chisel_code += " = " + get_name(cmpIOp.getLhs());
+                    chisel_code += getName(cmpIOp) + get_name(cmpIOp.getRhs()) + "\n";
                 } else {
-                    chisel_code += tab + "val " + get_name(cmpIOp.res());
-                    chisel_code += " = Wire(" + getType(cmpIOp.res().getType()) + ")\n";
-                    chisel_code += tab + get_name(cmpIOp.res()) + " := DontCare\n";
-                    chisel_code += tab + "when (" + get_bool_name(cmpIOp.guard()) + ") {\n";
-                    chisel_code += tab + "\t" + get_name(cmpIOp.res());
-                    chisel_code += " := " + get_name(cmpIOp.lhs());
-                    chisel_code += getName(cmpIOp) + get_name(cmpIOp.rhs()) + "\n";
+                    chisel_code += tab + "val " + get_name(cmpIOp.getRes());
+                    chisel_code += " = Wire(" + getType(cmpIOp.getRes().getType()) + ")\n";
+                    chisel_code += tab + get_name(cmpIOp.getRes()) + " := DontCare\n";
+                    chisel_code += tab + "when (" + get_bool_name(cmpIOp.getGuard()) + ") {\n";
+                    chisel_code += tab + "\t" + get_name(cmpIOp.getRes());
+                    chisel_code += " := " + get_name(cmpIOp.getLhs());
+                    chisel_code += getName(cmpIOp) + get_name(cmpIOp.getRhs()) + "\n";
                     chisel_code += tab + "}\n";
                 }
             } else if (auto selectOp = dyn_cast<hec::SelectOp>(op)) {
-                if (selectOp.guard() == Value()) {
+                if (selectOp.getGuard() == Value()) {
                     chisel_code += tab + "val " + get_name(selectOp.getResult());
                     chisel_code += " = Mux(" + get_bool_name(selectOp.getOperand(0));
                     chisel_code += ", " + get_name(selectOp.getOperand(1));
@@ -365,8 +367,8 @@ namespace mlir {
                     chisel_code += tab + "val " + get_name(selectOp.getResult());
                     chisel_code += " = Wire(" + getType(selectOp.getResult().getType()) + ")\n";
                     chisel_code += tab + get_name(selectOp.getResult()) + " := DontCare\n";
-                    chisel_code += tab + "when (" + get_bool_name(selectOp.guard()) + ") {\n";
-                    chisel_code += tab + "\t" + get_name(selectOp.res());
+                    chisel_code += tab + "when (" + get_bool_name(selectOp.getGuard()) + ") {\n";
+                    chisel_code += tab + "\t" + get_name(selectOp.getRes());
                     chisel_code += " := Mux(" + get_bool_name(selectOp.getOperand(0));
                     chisel_code += ", " + get_name(selectOp.getOperand(1));
                     chisel_code += ", " + get_name(selectOp.getOperand(2)) + ")\n";
@@ -387,65 +389,65 @@ namespace mlir {
             } else if (auto addIOp = dyn_cast<hec::SubIOp>(op)) {
                 insert_bitwise_operation(chisel_code, hec::SubIOp, " - ")
             } else if (auto notOp = dyn_cast<hec::NotOp>(op)) {
-                if (notOp.guard() == Value()) {
-                    chisel_code += tab + "val " + get_name(notOp.res());
-                    chisel_code += " = !" + get_name(notOp.src()) + "\n";
+                if (notOp.getGuard() == Value()) {
+                    chisel_code += tab + "val " + get_name(notOp.getRes());
+                    chisel_code += " = !" + get_name(notOp.getSrc()) + "\n";
                 } else {
-                    chisel_code += tab + "val " + get_name(notOp.res());
-                    chisel_code += " = Wire(" + getType(notOp.res().getType()) + ")\n";
-                    chisel_code += tab + get_name(notOp.res()) + " := DontCare\n";
-                    chisel_code += tab + "when (" + get_bool_name(notOp.guard()) + ") {\n";
-                    chisel_code += tab + "\t" + get_name(notOp.res());
-                    chisel_code += " := !" + get_name(notOp.src()) + "\n";
+                    chisel_code += tab + "val " + get_name(notOp.getRes());
+                    chisel_code += " = Wire(" + getType(notOp.getRes().getType()) + ")\n";
+                    chisel_code += tab + get_name(notOp.getRes()) + " := DontCare\n";
+                    chisel_code += tab + "when (" + get_bool_name(notOp.getGuard()) + ") {\n";
+                    chisel_code += tab + "\t" + get_name(notOp.getRes());
+                    chisel_code += " := !" + get_name(notOp.getSrc()) + "\n";
                     chisel_code += tab + "}\n";
                 }
             } else if (auto truncIOp = dyn_cast<hec::TruncateIOp>(op)) {
-                if (truncIOp.guard() == Value()) {
-                    chisel_code += tab + "val " + get_name(truncIOp.res());
-                    chisel_code += " = " + get_name(truncIOp.lhs()) + "\n";
+                if (truncIOp.getGuard() == Value()) {
+                    chisel_code += tab + "val " + get_name(truncIOp.getRes());
+                    chisel_code += " = " + get_name(truncIOp.getLhs()) + "\n";
                 } else {
-                    chisel_code += tab + "val " + get_name(truncIOp.res());
-                    chisel_code += " = Wire(" + getType(truncIOp.res().getType()) + ")\n";
-                    chisel_code += tab + get_name(truncIOp.res()) + " := DontCare\n";
-                    chisel_code += tab + "when (" + get_bool_name(truncIOp.guard()) + ") {\n";
-                    chisel_code += tab + "\t" + get_name(truncIOp.res());
-                    chisel_code += " := " + get_name(truncIOp.lhs()) + "\n";
+                    chisel_code += tab + "val " + get_name(truncIOp.getRes());
+                    chisel_code += " = Wire(" + getType(truncIOp.getRes().getType()) + ")\n";
+                    chisel_code += tab + get_name(truncIOp.getRes()) + " := DontCare\n";
+                    chisel_code += tab + "when (" + get_bool_name(truncIOp.getGuard()) + ") {\n";
+                    chisel_code += tab + "\t" + get_name(truncIOp.getRes());
+                    chisel_code += " := " + get_name(truncIOp.getLhs()) + "\n";
                     chisel_code += tab + "}\n";
                 }
             } else if (auto negFOp = dyn_cast<hec::NegFOp>(op)) {
                 auto type = negFOp.getResult().getType();
-                if (negFOp.guard() == Value()) {
-                    chisel_code += tab + "val " + get_name(negFOp.res());
+                if (negFOp.getGuard() == Value()) {
+                    chisel_code += tab + "val " + get_name(negFOp.getRes());
                     if (type.isa<Float32Type>()) {
-                        chisel_code += " = NegF(8, 24, " + get_name(negFOp.lhs()) + ")\n";
+                        chisel_code += " = NegF(8, 24, " + get_name(negFOp.getLhs()) + ")\n";
                     } else {
-                        chisel_code += " = NegF(11, 53, " + get_name(negFOp.lhs()) + ")\n";
+                        chisel_code += " = NegF(11, 53, " + get_name(negFOp.getLhs()) + ")\n";
                     }
                 } else {
-                    chisel_code += tab + "val " + get_name(negFOp.res());
-                    chisel_code += " = Wire(" + getType(negFOp.res().getType()) + ")\n";
-                    chisel_code += tab + get_name(negFOp.res()) + " := DontCare\n";
-                    chisel_code += tab + "when (" + get_bool_name(negFOp.guard()) + ") {\n";
-                    chisel_code += tab + "\t" + get_name(negFOp.res());
+                    chisel_code += tab + "val " + get_name(negFOp.getRes());
+                    chisel_code += " = Wire(" + getType(negFOp.getRes().getType()) + ")\n";
+                    chisel_code += tab + get_name(negFOp.getRes()) + " := DontCare\n";
+                    chisel_code += tab + "when (" + get_bool_name(negFOp.getGuard()) + ") {\n";
+                    chisel_code += tab + "\t" + get_name(negFOp.getRes());
                     if (type.isa<Float32Type>()) {
-                        chisel_code += " := NegF(8, 24, " + get_name(negFOp.lhs()) + ")\n";
+                        chisel_code += " := NegF(8, 24, " + get_name(negFOp.getLhs()) + ")\n";
                     } else {
-                        chisel_code += " := NegF(11, 53, " + get_name(negFOp.lhs()) + ")\n";
+                        chisel_code += " := NegF(11, 53, " + get_name(negFOp.getLhs()) + ")\n";
                     }
                     chisel_code += tab + "}\n";
                 }
             } else if (auto sextIOp = dyn_cast<hec::SignExtendIOp>(op)) {
                 //FIXME: Deal with sexti operation
-                if (sextIOp.guard() == Value()) {
-                    chisel_code += tab + "val " + get_name(sextIOp.res());
-                    chisel_code += " = " + get_name(sextIOp.lhs()) + "\n";
+                if (sextIOp.getGuard() == Value()) {
+                    chisel_code += tab + "val " + get_name(sextIOp.getRes());
+                    chisel_code += " = " + get_name(sextIOp.getLhs()) + "\n";
                 } else {
-                    chisel_code += tab + "val " + get_name(sextIOp.res());
-                    chisel_code += " = Wire(" + getType(sextIOp.res().getType()) + ")\n";
-                    chisel_code += tab + get_name(sextIOp.res()) + " := DontCare\n";
-                    chisel_code += tab + "when (" + get_bool_name(sextIOp.guard()) + ") {\n";
-                    chisel_code += tab + "\t" + get_name(sextIOp.res());
-                    chisel_code += " := " + get_name(sextIOp.lhs()) + "\n";
+                    chisel_code += tab + "val " + get_name(sextIOp.getRes());
+                    chisel_code += " = Wire(" + getType(sextIOp.getRes().getType()) + ")\n";
+                    chisel_code += tab + get_name(sextIOp.getRes()) + " := DontCare\n";
+                    chisel_code += tab + "when (" + get_bool_name(sextIOp.getGuard()) + ") {\n";
+                    chisel_code += tab + "\t" + get_name(sextIOp.getRes());
+                    chisel_code += " := " + get_name(sextIOp.getLhs()) + "\n";
                     chisel_code += tab + "}\n";
                 }
             } else {
@@ -459,7 +461,7 @@ namespace mlir {
             string chisel_state = "";
             chisel_state += "\tobject State extends ChiselEnum {\n\t\tval ";
             bool first = true;
-            for (auto &state : *(hec.getBody())) {
+            for (auto &state : hec.getBody().front()) {
                 if (auto stateOp = dyn_cast<hec::StateOp>(state)) {
                     chisel_state += (first ? "" : ", ") + get(stateOp.getName());
                     first = false;
@@ -467,10 +469,10 @@ namespace mlir {
             }
             chisel_state += " = Value\n\t}\n";
 
-            for (auto &state : *(hec.getBody())) {
+            for (auto &state : hec.getBody().front()) {
                 if (auto stateOp = dyn_cast<hec::StateOp>(state)) {
 //                    stateOp.dump();
-                    if (stateOp.initial()) {
+                    if (stateOp.getInitial()) {
                         chisel_state += "\tval state = RegInit(State." + get(stateOp.getName()) + ")\n";
                         chisel_state += "\tval ready = go & (state === State." + get(stateOp.getName()) + ")\n";
                     }
@@ -480,7 +482,7 @@ namespace mlir {
             chisel_state += "\tswitch (state) {\n";
 /*            for (auto &state : *(hec.getBody())) {
                 if (auto stateOp = dyn_cast<hec::StateOp>(state)) {
-                    if (stateOp.initial()) {
+                    if (stateOp.getInitial()) {
                         chisel_state += "\t\tis (State.idle) {\n";
                         chisel_state += "\t\t\twhen (go) {\n";
                         chisel_state += "\t\t\t\tstate := State." + get(stateOp.getName()) + "\n";
@@ -490,24 +492,24 @@ namespace mlir {
             }*/
 
             auto comp = cast<hec::ComponentOp>(hec->getParentOp());
-            for (auto &state : *(hec.getBody())) {
+            for (auto &state : hec.getBody().front()) {
                 if (auto stateOp = dyn_cast<hec::StateOp>(state)) {
                     chisel_state += "\t\tis (State." + get(stateOp.getName()) + ") {\n";
                     string tab = "\t\t\t";
-                    if (stateOp.initial()) {
+                    if (stateOp.getInitial()) {
                         chisel_state += "\t\t\twhen (go) {\n";
                         tab += "\t";
                     }
-                    for (auto &op : *(stateOp.getBody())) {
+                    for (auto &op : stateOp.getBody().front()) {
                         if (auto transition = dyn_cast<hec::TransitionOp>(op)) {
-                            for (auto &sop : *(transition.getBody())) {
+                            for (auto &sop : transition.getBody().front()) {
                                 if (auto branch = dyn_cast<hec::GotoOp>(sop)) {
-                                    if (branch.cond() == Value()) {
-                                        chisel_state += tab + "state := State." + get(branch.dest()) + ";\n";
+                                    if (branch.getCond() == Value()) {
+                                        chisel_state += tab + "state := State." + get(branch.getDest()) + ";\n";
                                     } else {
-                                        chisel_state += tab + "when (" + get_bool_name(branch.cond());
+                                        chisel_state += tab + "when (" + get_bool_name(branch.getCond());
                                         chisel_state +=
-                                                ") {\n\t" + tab + "state := State." + get(branch.dest()) + ";\n" + tab +
+                                                ") {\n\t" + tab + "state := State." + get(branch.getDest()) + ";\n" + tab +
                                                 "}\n";
                                     }
                                 }
@@ -518,12 +520,12 @@ namespace mlir {
                                         chisel_state += tab + "done := 1.U\n";
                                     }
                                     for (unsigned idx = 0; idx < done.getNumOperands(); ++idx) {
-                                        chisel_state += tab + get_name(comp.getArgument(comp.numInPorts() + idx));
+                                        chisel_state += tab + get_name(comp.getArgument(comp.getNumInPorts() + idx));
                                         chisel_state += " := " + get_name(done.getOperand(idx)) + "\n";
                                     }
                                 }
                                 if (auto done = dyn_cast<hec::CDoneOp>(sop)) {
-                                    chisel_state += tab + "when (" + get_bool_name(done.cond()) + ") {\n";
+                                    chisel_state += tab + "when (" + get_bool_name(done.getCond()) + ") {\n";
                                     if (wrapped) {
                                         chisel_state += tab + "\tdone()\n";
                                     } else {
@@ -531,41 +533,41 @@ namespace mlir {
                                     }
                                     for (unsigned idx = 1; idx < done.getNumOperands(); ++idx) {
                                         chisel_state +=
-                                                tab + "\t" + get_name(comp.getArgument(comp.numInPorts() + idx - 1));
+                                                tab + "\t" + get_name(comp.getArgument(comp.getNumInPorts() + idx - 1));
                                         chisel_state += " := " + get_name(done.getOperand(idx)) + "\n";
                                     }
                                     chisel_state += tab + "}\n";
                                 }
                             }
                         } else if (auto goOp = dyn_cast<hec::GoOp>(op)) {
-                            if (goOp.cond() == Value()) {
-                                chisel_state += tab + get(goOp.name()) + ".go := 1.U\n";
+                            if (goOp.getCond() == Value()) {
+                                chisel_state += tab + get(goOp.getName()) + ".go := 1.U\n";
                             } else {
-                                chisel_state += tab + "when (" + get_bool_name(goOp.cond()) + ") {\n";
-                                chisel_state += tab + "\t" + get(goOp.name()) + ".go := 1.U\n" + tab + "}\n";
+                                chisel_state += tab + "when (" + get_bool_name(goOp.getCond()) + ") {\n";
+                                chisel_state += tab + "\t" + get(goOp.getName()) + ".go := 1.U\n" + tab + "}\n";
                             }
                         } else if (auto assign = dyn_cast<hec::AssignOp>(op)) {
-                            if (assign.guard() == Value()) {
-                                chisel_state += tab + get_name(assign.dest()) + " := " + get_name(assign.src()) + "\n";
+                            if (assign.getGuard() == Value()) {
+                                chisel_state += tab + get_name(assign.getDest()) + " := " + get_name(assign.getSrc()) + "\n";
                             } else {
-                                chisel_state += tab + "when (" + get_bool_name(assign.guard()) + ") {\n";
+                                chisel_state += tab + "when (" + get_bool_name(assign.getGuard()) + ") {\n";
                                 chisel_state +=
-                                        tab + "\t" + get_name(assign.dest()) + " := " + get_name(assign.src()) + "\n";
+                                        tab + "\t" + get_name(assign.getDest()) + " := " + get_name(assign.getSrc()) + "\n";
                                 chisel_state += tab + "}\n";
                             }
                         } else if (auto enableOp = dyn_cast<hec::EnableOp>(op)) {
-                            if (enableOp.cond() == Value()) {
-                                chisel_state += tab + get_name(enableOp.port()) + " := true.B\n";
+                            if (enableOp.getCond() == Value()) {
+                                chisel_state += tab + get_name(enableOp.getPort()) + " := true.B\n";
                             } else {
-                                chisel_state += tab + "when (" + get_bool_name(enableOp.cond()) + ") {\n";
-                                chisel_state += tab + "\t" + get_name(enableOp.port()) + " := 1.U\n";
+                                chisel_state += tab + "when (" + get_bool_name(enableOp.getCond()) + ") {\n";
+                                chisel_state += tab + "\t" + get_name(enableOp.getPort()) + " := 1.U\n";
                                 chisel_state += tab + "}\n";
                             }
                         } else {
                             insert_arithmetic_op(chisel_state, tab, &op);
                         }
                     }
-                    if (stateOp.initial()) {
+                    if (stateOp.getInitial()) {
                         chisel_state += "\t\t\t}\n";
                     }
                     chisel_state += "\t\t}\n";
@@ -586,7 +588,7 @@ namespace mlir {
             auto comp = cast<hec::ComponentOp>(stageSet->getParentOp());
 
             int shift_size = ceil((latency + 1) * 1.0 / II);
-            int stage_size = stageSet.getBody()->getOperations().size();
+            int stage_size = stageSet.getBody().front().getOperations().size();
 
             chisel_stage += "\tval shift_register = RegInit(0.U(" + std::to_string(shift_size) + ".W))\n";
             if (!function) {
@@ -595,7 +597,7 @@ namespace mlir {
                                 "\t\twhen (" + get_name(comp.getArgument(0)) + " > " + get_name(comp.getArgument(1)) +
                                 ") {\n";
                 /*for (unsigned idx = 0; 2 * (idx + 1) + 3 < comp.getNumArguments(); ++idx) {
-                    chisel_stage += "\t\t\t" + get_name(comp.getArgument(comp.numInPorts() + idx)) + " := " +
+                    chisel_stage += "\t\t\t" + get_name(comp.getArgument(comp.getNumInPorts() + idx)) + " := " +
                                     get_name(comp.getArgument(idx + 3)) + "\n";
                 }*/
                 chisel_stage += "\t\t\tdone := true.B\n";
@@ -620,63 +622,63 @@ namespace mlir {
             auto dumpOperation = [&](string &tab, Operation *op, int stage) {
                 if (auto deliver = dyn_cast<hec::DeliverOp>(op)) {
                     auto done_signal = comp.getArgument(comp.getNumArguments() - 1);
-                    bool isReg = deliver.destReg().getDefiningOp();
+                    bool isReg = deliver.getDestReg().getDefiningOp();
                     if (isReg) {
-                        if (auto primitive = dyn_cast<hec::PrimitiveOp>(deliver.destReg().getDefiningOp())) {
-                            if (primitive.primitiveName() == "register") {
+                        if (auto primitive = dyn_cast<hec::PrimitiveOp>(deliver.getDestReg().getDefiningOp())) {
+                            if (primitive.getPrimitiveName() == "register") {
                                 isReg = true;
                             } else isReg = false;
                         } else isReg = false;
                     }
-                    if (deliver.guard() == Value()) {
+                    if (deliver.getGuard() == Value()) {
                         if (isReg) {
                             chisel_stage += tab + "when (valid(" + std::to_string(stage) + ")) {\n";
                             chisel_stage +=
-                                    tab + "\t" + get_name(deliver.destReg()) + " := " + get_name(deliver.src()) +
+                                    tab + "\t" + get_name(deliver.getDestReg()) + " := " + get_name(deliver.getSrc()) +
                                     "\n";
-                            if (done_signal != deliver.destPort()) {
+                            if (done_signal != deliver.getDestPort()) {
                                 chisel_stage +=
-                                        tab + "\t" + get_name(deliver.destPort()) + " := " + get_name(deliver.src()) +
+                                        tab + "\t" + get_name(deliver.getDestPort()) + " := " + get_name(deliver.getSrc()) +
                                         "\n";
                             }
                             chisel_stage += tab + "}\n";
                         } else {
                             chisel_stage +=
-                                    tab + get_name(deliver.destReg()) + " := " + get_name(deliver.src()) + "\n";
-                            if (done_signal != deliver.destPort()) {
+                                    tab + get_name(deliver.getDestReg()) + " := " + get_name(deliver.getSrc()) + "\n";
+                            if (done_signal != deliver.getDestPort()) {
                                 chisel_stage +=
-                                        tab + get_name(deliver.destPort()) + " := " + get_name(deliver.src()) + "\n";
+                                        tab + get_name(deliver.getDestPort()) + " := " + get_name(deliver.getSrc()) + "\n";
                             }
                         }
                     } else {
                         chisel_stage +=
                                 tab + "when (" + (isReg ? "valid(" + std::to_string(stage) + ") && " : "") +
-                                get_bool_name(deliver.guard()) + ") {\n";
+                                get_bool_name(deliver.getGuard()) + ") {\n";
                         chisel_stage +=
-                                tab + "\t" + get_name(deliver.destReg()) + " := " + get_name(deliver.src()) +
+                                tab + "\t" + get_name(deliver.getDestReg()) + " := " + get_name(deliver.getSrc()) +
                                 "\n";
-                        if (done_signal != deliver.destPort()) {
+                        if (done_signal != deliver.getDestPort()) {
                             chisel_stage +=
-                                    tab + "\t" + get_name(deliver.destPort()) + " := " + get_name(deliver.src()) + "\n";
+                                    tab + "\t" + get_name(deliver.getDestPort()) + " := " + get_name(deliver.getSrc()) + "\n";
                         }
                     }
                 } else if (auto yieldOp = dyn_cast<hec::YieldOp>(op)) {
                     chisel_stage += tab + "new_output := valid(" + std::to_string(latency) + ")\n";
                     for (unsigned idx = 0; idx < yieldOp.getNumOperands(); ++idx) {
-                        chisel_stage += tab + get_name(comp.getArgument(comp.numInPorts() + idx));
+                        chisel_stage += tab + get_name(comp.getArgument(comp.getNumInPorts() + idx));
                         chisel_stage += " := " + get_name(yieldOp.getOperand(idx)) + "\n";
                     }
                 } else if (auto enableOp = dyn_cast<hec::EnableOp>(op)) {
-                    if (enableOp.cond() == Value()) {
+                    if (enableOp.getCond() == Value()) {
                         chisel_stage += tab + "when (valid(" + std::to_string(stage) + ")) {\n";
-                        chisel_stage += tab + "\t" + get_name(enableOp.port()) + " := 1.U\n";
+                        chisel_stage += tab + "\t" + get_name(enableOp.getPort()) + " := 1.U\n";
                         chisel_stage += tab + "}\n";
                     } else {
                         chisel_stage +=
                                 tab + "when (valid(" + std::to_string(stage) + ") && " +
-                                get_bool_name(enableOp.cond()) +
+                                get_bool_name(enableOp.getCond()) +
                                 ") {\n";
-                        chisel_stage += tab + "\t" + get_name(enableOp.port()) + " := 1.U\n";
+                        chisel_stage += tab + "\t" + get_name(enableOp.getPort()) + " := 1.U\n";
                         chisel_stage += tab + "}\n";
                     }
                 } else {
@@ -716,43 +718,43 @@ namespace mlir {
                 for (int idx = 0; idx < II; ++idx) {
                     chisel_stage += "\twhen (counter === " + std::to_string(idx) + ".U) {\n";
                     for (int stage_idx = idx; stage_idx < stage_size; stage_idx += II) {
-                        auto stage = stageSet.getBody()->begin();
+                        auto stage = stageSet.getBody().front().begin();
                         for (unsigned next = 0; next < stage_idx; ++next) {
                             ++stage;
                         }
                         if (auto stageOp = dyn_cast<hec::StageOp>(stage)) {
                             string tab = "\t\t";
-                            for (auto &op : *(stageOp.getBody())) {
+                            for (auto &op : stageOp.getBody().front()) {
                                 if (auto assign = dyn_cast<hec::AssignOp>(op)) {
-                                    bool isReg = assign.dest().getDefiningOp();
+                                    bool isReg = assign.getDest().getDefiningOp();
                                     if (isReg) {
                                         if (auto primitive = dyn_cast<hec::PrimitiveOp>(
-                                                assign.dest().getDefiningOp())) {
-                                            if (primitive.primitiveName() == "register") {
+                                                assign.getDest().getDefiningOp())) {
+                                            if (primitive.getPrimitiveName() == "register") {
                                                 isReg = true;
                                             } else isReg = false;
                                         } else isReg = false;
                                     }
-                                    if (assign.guard() == Value()) {
+                                    if (assign.getGuard() == Value()) {
                                         if (isReg) {
                                             chisel_stage += tab + "when (valid(" + std::to_string(stage_idx) + ")) {\n";
                                             chisel_stage +=
-                                                    tab + "\t" + get_name(assign.dest()) + " := " +
-                                                    get_name(assign.src()) +
+                                                    tab + "\t" + get_name(assign.getDest()) + " := " +
+                                                    get_name(assign.getSrc()) +
                                                     "\n";
                                             chisel_stage += tab + "}\n";
                                         } else {
                                             chisel_stage +=
-                                                    tab + get_name(assign.dest()) + " := " + get_name(assign.src()) +
+                                                    tab + get_name(assign.getDest()) + " := " + get_name(assign.getSrc()) +
                                                     "\n";
                                         }
                                     } else {
                                         chisel_stage += tab + "when (" +
                                                         (isReg ? ("valid(" + std::to_string(stage_idx) + ") && ")
                                                                : "") +
-                                                        get_bool_name(assign.guard()) + ") {\n";
+                                                        get_bool_name(assign.getGuard()) + ") {\n";
                                         chisel_stage +=
-                                                tab + "\t" + get_name(assign.dest()) + " := " + get_name(assign.src()) +
+                                                tab + "\t" + get_name(assign.getDest()) + " := " + get_name(assign.getSrc()) +
                                                 "\n";
                                         chisel_stage += tab + "}\n";
                                     }
@@ -789,36 +791,36 @@ namespace mlir {
                                 ", 0), new_input)\n";
                 chisel_stage += "\twhen (true.B) {\n";
                 int stage_idx = 0;
-                for (auto &stage : *stageSet.getBody()) {
+                for (auto &stage : stageSet.getBody().front()) {
                     if (auto stageOp = dyn_cast<hec::StageOp>(stage)) {
                         string tab = "\t\t";
-                        for (auto &op : *(stageOp.getBody())) {
+                        for (auto &op : stageOp.getBody().front()) {
                             if (auto assign = dyn_cast<hec::AssignOp>(op)) {
-                                bool isReg = assign.dest().getDefiningOp();
+                                bool isReg = assign.getDest().getDefiningOp();
                                 if (isReg) {
-                                    if (auto primitive = dyn_cast<hec::PrimitiveOp>(assign.dest().getDefiningOp())) {
-                                        if (primitive.primitiveName() == "register") {
+                                    if (auto primitive = dyn_cast<hec::PrimitiveOp>(assign.getDest().getDefiningOp())) {
+                                        if (primitive.getPrimitiveName() == "register") {
                                             isReg = true;
                                         } else isReg = false;
                                     } else isReg = false;
                                 }
-                                if (assign.guard() == Value()) {
+                                if (assign.getGuard() == Value()) {
                                     if (isReg) {
                                         chisel_stage += tab + "when (valid(" + std::to_string(stage_idx) + ")) {\n";
                                         chisel_stage +=
-                                                tab + "\t" + get_name(assign.dest()) + " := " + get_name(assign.src()) +
+                                                tab + "\t" + get_name(assign.getDest()) + " := " + get_name(assign.getSrc()) +
                                                 "\n";
                                         chisel_stage += tab + "}\n";
                                     } else {
                                         chisel_stage +=
-                                                tab + get_name(assign.dest()) + " := " + get_name(assign.src()) + "\n";
+                                                tab + get_name(assign.getDest()) + " := " + get_name(assign.getSrc()) + "\n";
                                     }
                                 } else {
                                     chisel_stage += tab + "when (" +
                                                     (isReg ? ("valid(" + std::to_string(stage_idx) + ") && ") : "") +
-                                                    get_bool_name(assign.guard()) + ") {\n";
+                                                    get_bool_name(assign.getGuard()) + ") {\n";
                                     chisel_stage +=
-                                            tab + "\t" + get_name(assign.dest()) + " := " + get_name(assign.src()) +
+                                            tab + "\t" + get_name(assign.getDest()) + " := " + get_name(assign.getSrc()) +
                                             "\n";
                                     chisel_stage += tab + "}\n";
                                 }
@@ -857,10 +859,10 @@ namespace mlir {
         }
 
         string dumpInstance(hec::InstanceOp &instance, hec::ComponentOp &comp) {
-            bool wrapped = comp.interfc() == "wrapped";
+            bool wrapped = comp.getInterfc() == "wrapped";
             bool sub_wrapped = false;
-            string modName = get(instance.instanceName());
-            string compName = get(instance.componentName());
+            string modName = get(instance.getInstanceName());
+            string compName = get(instance.getComponentName());
             string chisel_instance = "\tval " + modName;
             chisel_instance += " = Module(new " + compName + ")\n";
             if (!wrapped) {
@@ -871,7 +873,7 @@ namespace mlir {
                 auto hecDesign = cast<hec::DesignOp>(comp->getParentOp());
                 hecDesign.walk([&](hec::ComponentOp op) {
                     if (op.getName() == compName) {
-                        sub_wrapped = op.interfc() == "wrapped";
+                        sub_wrapped = op.getInterfc() == "wrapped";
                         }
                 });
             }
@@ -945,13 +947,13 @@ namespace mlir {
 
         string dumpGraph(hec::GraphOp &graph) {
             string chisel_graph = "";
-            for (auto &op : *(graph.getBody())) {
+            for (auto &op : graph.getBody().front()) {
                 if (auto assign = dyn_cast<hec::AssignOp>(op)) {
-                    if (assign.src().getDefiningOp() && isa<ConstantOp>(assign.src().getDefiningOp())) {
-                        chisel_graph += "\t" + get_name(assign.dest()) + ".bits := " + get_name(assign.src()) + "\n";
-                        chisel_graph += "\t" + get_name(assign.dest()) + ".valid := true.B\n";
+                    if (assign.getSrc().getDefiningOp() && isa<arith::ConstantOp>(assign.getSrc().getDefiningOp())) {
+                        chisel_graph += "\t" + get_name(assign.getDest()) + ".bits := " + get_name(assign.getSrc()) + "\n";
+                        chisel_graph += "\t" + get_name(assign.getDest()) + ".valid := true.B\n";
                     } else {
-                        chisel_graph += "\t" + get_name(assign.dest()) + " <> " + get_name(assign.src()) + "\n";
+                        chisel_graph += "\t" + get_name(assign.getDest()) + " <> " + get_name(assign.getSrc()) + "\n";
                     }
                 }
             }
@@ -1056,7 +1058,7 @@ namespace mlir {
 
         string dumpSTGComponent(hec::ComponentOp &comp) {
             string chisel_component = "class ";
-            bool wrapped = comp.interfc() == "wrapped";
+            bool wrapped = comp.getInterfc() == "wrapped";
             string compName = get(comp.getName());
             chisel_component += compName + " extends MultiIOModule {\n";
             portNames[compName] = std::vector<string>();
@@ -1066,9 +1068,9 @@ namespace mlir {
             } else {
 
             }
-            numInPorts[compName] = comp.numInPorts();
+            numInPorts[compName] = comp.getNumInPorts();
             for (auto val : comp.getArguments()) {
-                if (!wrapped && val.getArgNumber() == comp.numInPorts() - 1) {
+                if (!wrapped && val.getArgNumber() == comp.getNumInPorts() - 1) {
                     portNames[compName].push_back("go");
                     continue;
                 } else if (!wrapped && val.getArgNumber() == comp.getNumArguments() - 1) {
@@ -1078,10 +1080,10 @@ namespace mlir {
                 if (!wrapped) {
                     portNames[compName].push_back(get_name(val));
                     chisel_component += "\tval " + get_name(val) + " = IO(";
-                    chisel_component += val.getArgNumber() < comp.numInPorts() ? "Input(" : "Output(";
+                    chisel_component += val.getArgNumber() < comp.getNumInPorts() ? "Input(" : "Output(";
                     chisel_component += getType(val.getType());
                     chisel_component += "))\n";
-                    if (val.getArgNumber() >= comp.numInPorts()) {
+                    if (val.getArgNumber() >= comp.getNumInPorts()) {
                         chisel_component += "\t" + get_name(val) + " := DontCare\n";
                     }
                 } else {
@@ -1089,14 +1091,14 @@ namespace mlir {
                     portNames[compName].push_back(moduleName + "_dyn");
                     chisel_component += "\tval " + moduleName + "_dyn = IO(";
                     chisel_component +=
-                            val.getArgNumber() < comp.numInPorts() ? "Flipped(DecoupledIO(" : "DecoupledIO(";
+                            val.getArgNumber() < comp.getNumInPorts() ? "Flipped(DecoupledIO(" : "DecoupledIO(";
                     chisel_component += getType(val.getType());
-                    if (val.getArgNumber() < comp.numInPorts()) {
+                    if (val.getArgNumber() < comp.getNumInPorts()) {
                         chisel_component += ")";
                     }
                     chisel_component += "))\n";
                     chisel_component += "\tval " + moduleName + " = " + moduleName + "_dyn.bits\n";
-                    if (val.getArgNumber() >= comp.numInPorts()) {
+                    if (val.getArgNumber() >= comp.getNumInPorts()) {
                         chisel_component += "\t" + moduleName + " := DontCare\n";
                         chisel_component += "\t" + moduleName + "_dyn.valid := false.B\n";
                     }
@@ -1107,7 +1109,7 @@ namespace mlir {
                 chisel_component += "\tval go = ";
                 unsigned portNum = portNames[compName].size();
                 bool first = true;
-                for (unsigned idx = comp.numInPorts(); idx < portNum; ++idx) {
+                for (unsigned idx = comp.getNumInPorts(); idx < portNum; ++idx) {
                     if (first) {
                         first = false;
                     } else {
@@ -1115,7 +1117,7 @@ namespace mlir {
                     }
                     chisel_component += portNames[compName][idx] + ".ready";
                 }
-                for (unsigned idx = 0; idx < comp.numInPorts(); ++idx) {
+                for (unsigned idx = 0; idx < comp.getNumInPorts(); ++idx) {
                     if (first) {
                         first = false;
                     } else {
@@ -1125,27 +1127,27 @@ namespace mlir {
                 }
                 chisel_component += "\n";
                 chisel_component += "\tdef done() : Unit = {\n";
-                for (unsigned idx = comp.numInPorts(); idx < portNum; ++idx) {
+                for (unsigned idx = comp.getNumInPorts(); idx < portNum; ++idx) {
                     chisel_component += "\t\t" + portNames[compName][idx] + ".valid := true.B\n";
                 }
                 chisel_component += "\t}\n";
             }
             //            comp->dump();
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : (comp.getBody().front())) {
                 if (auto hec = dyn_cast<hec::StateSetOp>(op)) {
                     chisel_component += generateMemPorts(comp);
                     chisel_component += dumpState(hec, wrapped);
                 } else if (auto instance = dyn_cast<hec::InstanceOp>(op)) {
                     chisel_component += dumpInstance(instance, comp);
                 } else if (auto primitive = dyn_cast<hec::PrimitiveOp>(op)) {
-                    if (primitive.primitiveName() == "register") {
+                    if (primitive.getPrimitiveName() == "register") {
                         assert(primitive->getNumResults() == 1 && "Invalid register");
                         chisel_component += "\tval " + get_name(primitive.getResult(0));
                         chisel_component += " = Reg(" + getType(primitive.getType(0)) + ")\n";
                     } else {
                         insert_arithmetic_primitive(chisel_component, primitive, comp);
                     }
-                } else if (auto constant = dyn_cast<ConstantOp>(op)) {
+                } else if (auto constant = dyn_cast<arith::ConstantOp>(op)) {
                 } else {
                     op.dump();
                     assert(false && "Undefined operation in hec Component");
@@ -1153,7 +1155,7 @@ namespace mlir {
             }
             if (wrapped) {
                 unsigned portNum = portNames[compName].size();
-                for (unsigned idx = 0; idx < comp.numInPorts(); ++idx) {
+                for (unsigned idx = 0; idx < comp.getNumInPorts(); ++idx) {
                     chisel_component += "\t" + portNames[compName][idx] + ".ready := ready\n";
                 }
             }
@@ -1164,7 +1166,7 @@ namespace mlir {
         void dummyComponent(hec::ComponentOp &comp) {
             string compName = get(comp.getName());
             portNames[compName] = std::vector<string>();
-            numInPorts[compName] = comp.numInPorts();
+            numInPorts[compName] = comp.getNumInPorts();
             auto ports = hec::getComponentPortInfo(&*comp);
             for (auto val : comp.getArguments()) {
                 set_name(val, get(ports[val.getArgNumber()].name.getValue()));
@@ -1181,40 +1183,40 @@ namespace mlir {
             portNames[compName] = std::vector<string>();
 //            chisel_component += "\tval go = IO(Input(Bool()))\n";
 //            chisel_component += "\tval done = IO(Output(Bool()))\n\tdone := 0.U\n";
-            numInPorts[compName] = comp.numInPorts();
+            numInPorts[compName] = comp.getNumInPorts();
             for (auto val : comp.getArguments()) {
                 portNames[compName].push_back(get_name(val));
                 //                val.dump();
                 chisel_component += "\tval " + get_name(val) + " = IO(";
                 chisel_component +=
-                        val.getArgNumber() < comp.numInPorts() ? "Flipped(DecoupledIO(" : "DecoupledIO(";
+                        val.getArgNumber() < comp.getNumInPorts() ? "Flipped(DecoupledIO(" : "DecoupledIO(";
 
                 //                llvm::raw_string_ostream out(chisel_component);
                 //                val.getType().print(out);
                 chisel_component += getType(val.getType());
-                chisel_component += val.getArgNumber() < comp.numInPorts() ? ")))\n" : "))\n";
-                if (val.getArgNumber() >= comp.numInPorts()) {
+                chisel_component += val.getArgNumber() < comp.getNumInPorts() ? ")))\n" : "))\n";
+                if (val.getArgNumber() >= comp.getNumInPorts()) {
                     chisel_component += "\t" + get_name(val) + " := DontCare\n";
                 }
             }
             //            comp->dump();
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : (comp.getBody()).front()) {
                 if (auto graph = dyn_cast<hec::GraphOp>(op)) {
                     chisel_component += dumpGraph(graph);
                 } else if (auto instance = dyn_cast<hec::InstanceOp>(op)) {
                     chisel_component += dumpInstance(instance, comp);
                 } else if (auto primitive = dyn_cast<hec::PrimitiveOp>(op)) {
-                    //                    std::cerr << get(primitive.instanceName()) << std::endl;
-                    //                    std::cerr << get(primitive.primitiveName()) << std::endl;
-                    if (primitive.primitiveName() == "register") {
+                    //                    std::cerr << get(primitive.getInstanceName()) << std::endl;
+                    //                    std::cerr << get(primitive.getPrimitiveName()) << std::endl;
+                    if (primitive.getPrimitiveName() == "register") {
                         assert(primitive->getNumResults() == 1 && "Invalid register");
                         chisel_component += "\tval " + get_name(primitive.getResult(0));
                         chisel_component += " = Reg(" + getType(primitive.getType(0)) + ")\n";
                     } else {
-                        string moduleName = get(primitive.instanceName());
+                        string moduleName = get(primitive.getInstanceName());
                         chisel_component += "\tval " + moduleName + " = Module(new ";
                         //Fixme : Consider about integer width in primitive operations
-                        string primName = get(primitive.primitiveName());
+                        string primName = get(primitive.getPrimitiveName());
                         if (primName == "add_integer") {
                             chisel_component +=
                                     "AddIDynamic(" + std::to_string(getWidth(primitive.getResult(0).getType())) + ")";
@@ -1372,7 +1374,7 @@ namespace mlir {
                             chisel_component += "ElasticFIFO(" + primName.substr(primName.find(":") + 1) + "," +
                                                 std::to_string(getWidth(primitive.getResult(1).getType())) + ")";
                         } else {
-                            std::cerr << get(primitive.primitiveName()) << std::endl;
+                            std::cerr << get(primitive.getPrimitiveName()) << std::endl;
                             assert(false && "Unknown primitive operation");
                         }
                         chisel_component += ")\n";
@@ -1387,16 +1389,16 @@ namespace mlir {
                             chisel_component += portName + "\n";
                             chisel_component += "\t" + get_name(val) + " := DontCare\n";
                         }
-                        //                        std::cerr << get(primitive.primitiveName()) << std::endl;
+                        //                        std::cerr << get(primitive.getPrimitiveName()) << std::endl;
                         //                        assert(false && "Unknown primitive operation");
                     }
-                } else if (auto constant = dyn_cast<ConstantOp>(op)) {
+                } else if (auto constant = dyn_cast<arith::ConstantOp>(op)) {
                 } else {
                     op.dump();
                     assert(false && "Undefined operation in hec Component");
                 }
             }
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : comp.getBody().front()) {
                 if (auto primitive = dyn_cast<hec::PrimitiveOp>(op)) {
                     auto portInfo = primitive.getPrimitivePortInfo();
                     for (unsigned idx = 0; idx < portInfo.size(); ++idx) {
@@ -1406,14 +1408,14 @@ namespace mlir {
                             int use_count = 0;
                             for (auto &bval : port.getUses()) {
                                 if (auto assign = dyn_cast<hec::AssignOp>(bval.getOwner())) {
-                                    if (assign.src() == port) {
+                                    if (assign.getSrc() == port) {
                                         assign_set.push_back(assign);
                                         ++use_count;
                                     }
                                 }
                             }
                             if (use_count == 0) {
-//                                std::cerr << primitive.primitiveName().str() << "SINK";
+//                                std::cerr << primitive.getPrimitiveName().str() << "SINK";
 //                                primitive.dump();
 //                                std::cerr << portInfo[idx].name.getValue().str() << ":";
 //                                port.dump();
@@ -1423,18 +1425,18 @@ namespace mlir {
                     }
                 }
             }
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : (comp.getBody().front())) {
                 if (auto instance = dyn_cast<hec::InstanceOp>(op)) {
-                    string instanceName = instance.instanceName().str();
-                    string componentName = instance.componentName().str();
+                    string instanceName = instance.getInstanceName().str();
+                    string componentName = instance.getComponentName().str();
                     auto &allMemOutPorts = DUMP::memOutPortNames[componentName];
                     for (auto memPort : allMemOutPorts) {
                         //FIXME: Deal with arbiter number
                         auto memory = cast<hec::PrimitiveOp>(memPort.val.getDefiningOp());
-                        string name = DUMP::get(memory.instanceName()) + memPort.name + memPort.data;
+                        string name = DUMP::get(memory.getInstanceName()) + memPort.name + memPort.data;
                         int arbiterNum = DUMP::arbiterNums[name];
                         DUMP::arbiterNums[name] = arbiterNum + 1;
-                        chisel_component += "\t" + DUMP::get(memory.instanceName()) + "." + memPort.name + "(" +
+                        chisel_component += "\t" + DUMP::get(memory.getInstanceName()) + "." + memPort.name + "(" +
                                             std::to_string(arbiterNum) + ").";
                         chisel_component += memPort.data + " := " + instanceName + "." + memPort.portName + "\n";
                     }
@@ -1451,7 +1453,7 @@ namespace mlir {
         }
 
         string dumpPipelineFunctionComponent(hec::ComponentOp &comp) {
-            bool wrapped = comp.interfc() == "wrapped";
+            bool wrapped = comp.getInterfc() == "wrapped";
             string chisel_component = "class ";
             string compName = get(comp.getName());
             chisel_component += compName + " extends MultiIOModule {\n";
@@ -1463,10 +1465,10 @@ namespace mlir {
 //            chisel_component += "\tval start = IO(Input(Bool()))\n";
             //Useless
             chisel_component += "\tval new_output = IO(Output(Bool()))\n\tnew_output := 0.U\n";
-            numInPorts[compName] = comp.numInPorts();
+            numInPorts[compName] = comp.getNumInPorts();
             if (!wrapped) {
                 for (auto val : comp.getArguments()) {
-                    if (val.getArgNumber() == comp.numInPorts() - 1) {
+                    if (val.getArgNumber() == comp.getNumInPorts() - 1) {
                         portNames[compName].push_back("go");
                         continue;
                     } else if (val.getArgNumber() == comp.getNumArguments() - 1) {
@@ -1475,10 +1477,10 @@ namespace mlir {
                     }
                     portNames[compName].push_back(get_name(val));
                     chisel_component += "\tval " + get_name(val) + " = IO(";
-                    chisel_component += val.getArgNumber() < comp.numInPorts() ? "Input(" : "Output(";
+                    chisel_component += val.getArgNumber() < comp.getNumInPorts() ? "Input(" : "Output(";
                     chisel_component += getType(val.getType());
                     chisel_component += "))\n";
-                    if (val.getArgNumber() >= comp.numInPorts()) {
+                    if (val.getArgNumber() >= comp.getNumInPorts()) {
                         chisel_component += "\t" + get_name(val) + " := DontCare\n";
                     }
                 }
@@ -1489,7 +1491,7 @@ namespace mlir {
                 bool first_out = true;
                 for (auto val : comp.getArguments()) {
                     //FIXME: go & done signals
-                    if (val.getArgNumber() == comp.numInPorts() - 1) {
+                    if (val.getArgNumber() == comp.getNumInPorts() - 1) {
                         portNames[compName].push_back("go");
                         continue;
                     } else if (val.getArgNumber() == comp.getNumArguments() - 1) {
@@ -1499,14 +1501,14 @@ namespace mlir {
                     string val_name = get_name(val);
                     portNames[compName].push_back(val_name);
                     chisel_component += "\tval d_" + val_name + " = IO(";
-                    chisel_component += val.getArgNumber() < comp.numInPorts() ?
+                    chisel_component += val.getArgNumber() < comp.getNumInPorts() ?
                                         "Flipped(DecoupledIO(" :
                                         "DecoupledIO(";
                     chisel_component += getType(val.getType());
-                    chisel_component += val.getArgNumber() < comp.numInPorts() ?
+                    chisel_component += val.getArgNumber() < comp.getNumInPorts() ?
                                         ")))\n" : "))\n";
                     chisel_component += "\tval " + val_name + " = d_" + val_name + ".bits\n";
-                    if (val.getArgNumber() >= comp.numInPorts()) {
+                    if (val.getArgNumber() >= comp.getNumInPorts()) {
                         chisel_component += "\t" + val_name + " := DontCare\n";
                         chisel_component += "\td_" + val_name + ".valid := false.B\n";
                         if (!first_out) {
@@ -1531,27 +1533,27 @@ namespace mlir {
 
             int II = comp->getAttr("II").cast<IntegerAttr>().getInt();
             int latency = comp->getAttr("latency").cast<IntegerAttr>().getInt();
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : (comp.getBody().front())) {
                 if (auto hec = dyn_cast<hec::StageSetOp>(op)) {
                     chisel_component += generateMemPorts(comp);
                     chisel_component += dumpStage(hec, II, latency, true);
                 } else if (auto instance = dyn_cast<hec::InstanceOp>(op)) {
                     chisel_component += dumpInstance(instance, comp);
                 } else if (auto primitive = dyn_cast<hec::PrimitiveOp>(op)) {
-                    //                    std::cerr << get(primitive.instanceName()) << std::endl;
-                    //                    std::cerr << get(primitive.primitiveName()) << std::endl;
-                    if (primitive.primitiveName() == "register") {
+                    //                    std::cerr << get(primitive.getInstanceName()) << std::endl;
+                    //                    std::cerr << get(primitive.getPrimitiveName()) << std::endl;
+                    if (primitive.getPrimitiveName() == "register") {
                         assert(primitive->getNumResults() == 1 && "Invalid register");
                         chisel_component += "\tval " + get_name(primitive.getResult(0));
                         chisel_component += " = Reg(" + getType(primitive.getType(0)) + ")\n";
                     } else {
                         insert_arithmetic_primitive(chisel_component, primitive, comp, true);
                     }
-                } else if (auto constant = dyn_cast<ConstantOp>(op)) {
+                } else if (auto constant = dyn_cast<arith::ConstantOp>(op)) {
                 } else if (auto init = dyn_cast<hec::InitOp>(op)) {
                     chisel_component += "\twhen (go & continue) {\n";
                     chisel_component +=
-                            "\t\t" + get_name(init.dst()) + " := " + get_name(init.src()) + "\n\t}\n";
+                            "\t\t" + get_name(init.getDst()) + " := " + get_name(init.getSrc()) + "\n\t}\n";
                 } else {
                     op.dump();
                     assert(false && "Undefined operation in hec Component");
@@ -1561,13 +1563,13 @@ namespace mlir {
                                 "\t\twhen (counter === 0.U) {\n";
             for (auto val : comp.getArguments()) {
                 //FIXME: go & done signals
-                if (val.getArgNumber() == comp.numInPorts() - 1) {
+                if (val.getArgNumber() == comp.getNumInPorts() - 1) {
                     continue;
                 } else if (val.getArgNumber() == comp.getNumArguments() - 1) {
                     continue;
                 }
                 string val_name = get_name(val);
-                if (val.getArgNumber() >= comp.numInPorts()) {
+                if (val.getArgNumber() >= comp.getNumInPorts()) {
                 } else {
                     chisel_component += "\t\t\td_" + get_name(val) + ".ready := all_valid\n";
                 }
@@ -1575,13 +1577,13 @@ namespace mlir {
             chisel_component += "\t\t}\n";
             for (auto val : comp.getArguments()) {
                 //FIXME: go & done signals
-                if (val.getArgNumber() == comp.numInPorts() - 1) {
+                if (val.getArgNumber() == comp.getNumInPorts() - 1) {
                     continue;
                 } else if (val.getArgNumber() == comp.getNumArguments() - 1) {
                     continue;
                 }
                 string val_name = get_name(val);
-                if (val.getArgNumber() >= comp.numInPorts()) {
+                if (val.getArgNumber() >= comp.getNumInPorts()) {
                     chisel_component += "\t\td_" + get_name(val) + ".valid := done\n";
                 } else {
                 }
@@ -1592,7 +1594,7 @@ namespace mlir {
         }
 
         string dumpPipelineForComponent(hec::ComponentOp &comp) {
-            bool wrapped = comp.interfc() == "wrapped";
+            bool wrapped = comp.getInterfc() == "wrapped";
             string chisel_component = "class ";
             string compName = get(comp.getName());
             chisel_component += compName + " extends MultiIOModule {\n";
@@ -1608,10 +1610,10 @@ namespace mlir {
             } else {
                 chisel_component += "\tval done = Wire(Bool())\n\tdone := 0.U\n";
             }
-            numInPorts[compName] = comp.numInPorts();
+            numInPorts[compName] = comp.getNumInPorts();
             if (!wrapped) {
                 for (auto val : comp.getArguments()) {
-                    if (val.getArgNumber() == comp.numInPorts() - 1) {
+                    if (val.getArgNumber() == comp.getNumInPorts() - 1) {
                         portNames[compName].push_back("go");
                         continue;
                     } else if (val.getArgNumber() == comp.getNumArguments() - 1) {
@@ -1620,10 +1622,10 @@ namespace mlir {
                     }
                     portNames[compName].push_back(get_name(val));
                     chisel_component += "\tval " + get_name(val) + " = IO(";
-                    chisel_component += val.getArgNumber() < comp.numInPorts() ? "Input(" : "Output(";
+                    chisel_component += val.getArgNumber() < comp.getNumInPorts() ? "Input(" : "Output(";
                     chisel_component += getType(val.getType());
                     chisel_component += "))\n";
-                    if (val.getArgNumber() >= comp.numInPorts()) {
+                    if (val.getArgNumber() >= comp.getNumInPorts()) {
                         chisel_component += "\t" + get_name(val) + " := DontCare\n";
                     }
                 }
@@ -1633,7 +1635,7 @@ namespace mlir {
                 bool first = true;
                 for (auto val : comp.getArguments()) {
                     //FIXME: go & done signals
-                    if (val.getArgNumber() == comp.numInPorts() - 1) {
+                    if (val.getArgNumber() == comp.getNumInPorts() - 1) {
                         portNames[compName].push_back("go");
                         continue;
                     } else if (val.getArgNumber() == comp.getNumArguments() - 1) {
@@ -1643,14 +1645,14 @@ namespace mlir {
                     string val_name = get_name(val);
                     portNames[compName].push_back(val_name);
                     chisel_component += "\tval d_" + val_name + " = IO(";
-                    chisel_component += val.getArgNumber() < comp.numInPorts() ?
+                    chisel_component += val.getArgNumber() < comp.getNumInPorts() ?
                                         "Flipped(DecoupledIO(" :
                                         "DecoupledIO(";
                     chisel_component += getType(val.getType());
-                    chisel_component += val.getArgNumber() < comp.numInPorts() ?
+                    chisel_component += val.getArgNumber() < comp.getNumInPorts() ?
                                         ")))\n" : "))\n";
                     chisel_component += "\tval " + val_name + " = d_" + val_name + ".bits\n";
-                    if (val.getArgNumber() >= comp.numInPorts()) {
+                    if (val.getArgNumber() >= comp.getNumInPorts()) {
                         chisel_component += "\t" + get_name(val) + " := DontCare\n";
                         go += " & d_" + val_name + ".ready";
                     } else {
@@ -1668,20 +1670,20 @@ namespace mlir {
 
             int II = comp->getAttr("II").cast<IntegerAttr>().getInt();
             int latency;
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : comp.getBody().front()) {
                 if (auto hec = dyn_cast<hec::StageSetOp>(op)) {
-                    latency = hec.getBody()->getOperations().size() - 1;
+                    latency = hec.getBody().front().getOperations().size() - 1;
                 }
             }
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : comp.getBody().front()) {
                 if (auto hec = dyn_cast<hec::StageSetOp>(op)) {
                     chisel_component += generateMemPorts(comp);
                     chisel_component += dumpStage(hec, II, latency);
                 } else if (auto instance = dyn_cast<hec::InstanceOp>(op)) {
                     chisel_component += dumpInstance(instance, comp);
                 } else if (auto wire = dyn_cast<hec::WireOp>(op)) {
-                    if (wire.name() == "i") {
-                        string index = get_name(wire.out());
+                    if (wire.getName() == "i") {
+                        string index = get_name(wire.getOut());
                         chisel_component += "\tval " + index;
                         chisel_component += " = Reg(" + getType(comp.getArgument(0).getType()) + ")\n";
                         chisel_component +=
@@ -1693,27 +1695,27 @@ namespace mlir {
                 } else if (auto init = dyn_cast<hec::InitOp>(op)) {
                     chisel_component += "\twhen (go) {\n";
                     chisel_component +=
-                            "\t\t" + get_name(init.dst()) + " := " + get_name(init.src()) + "\n\t}\n";
+                            "\t\t" + get_name(init.getDst()) + " := " + get_name(init.getSrc()) + "\n\t}\n";
                 } else if (auto primitive = dyn_cast<hec::PrimitiveOp>(op)) {
-                    //                    std::cerr << get(primitive.instanceName()) << std::endl;
-                    //                    std::cerr << get(primitive.primitiveName()) << std::endl;
-                    if (primitive.primitiveName() == "register") {
+                    //                    std::cerr << get(primitive.getInstanceName()) << std::endl;
+                    //                    std::cerr << get(primitive.getPrimitiveName()) << std::endl;
+                    if (primitive.getPrimitiveName() == "register") {
                         assert(primitive->getNumResults() == 1 && "Invalid register");
                         chisel_component += "\tval " + get_name(primitive.getResult(0));
                         chisel_component += " = Reg(" + getType(primitive.getType(0)) + ")\n";
                     } else {
                         insert_arithmetic_primitive(chisel_component, primitive, comp);
                     }
-                } else if (auto constant = dyn_cast<ConstantOp>(op)) {
+                } else if (auto constant = dyn_cast<arith::ConstantOp>(op)) {
                 } else {
                     op.dump();
                     assert(false && "Undefined operation in hec Component");
                 }
             }
-            for (auto &op : *(comp.getBody())) {
+            for (auto &op : comp.getBody().front()) {
                 if (auto wire = dyn_cast<hec::WireOp>(op)) {
-                    if (wire.name() == "i") {
-                        string index = get_name(wire.out());
+                    if (wire.getName() == "i") {
+                        string index = get_name(wire.getOut());
                         chisel_component +=
                                 "\tval ub_reg = Reg(" + getType(comp.getArgument(1).getType()) + ")\n";
                         chisel_component += "\twhen (go) {\n"
@@ -1764,13 +1766,13 @@ namespace mlir {
 
                             for (auto val : comp.getArguments()) {
                                 //FIXME: go & done signals
-                                if (val.getArgNumber() == comp.numInPorts() - 1) {
+                                if (val.getArgNumber() == comp.getNumInPorts() - 1) {
                                     continue;
                                 } else if (val.getArgNumber() == comp.getNumArguments() - 1) {
                                     continue;
                                 }
                                 string val_name = get_name(val);
-                                if (val.getArgNumber() >= comp.numInPorts()) {
+                                if (val.getArgNumber() >= comp.getNumInPorts()) {
                                     chisel_component += "\td_" + val_name + ".valid := done\n";
                                 } else {
                                     chisel_component += "\td_" + val_name + ".ready := all_valid & init\n";
@@ -1793,30 +1795,30 @@ namespace mlir {
             std::string chisel_code = "";
             bool found_dynamic = false;
             hec::DesignOp hecDesign;
-            for (auto &module : *(m.getBody())) {
+            for (auto &module : m.getBodyRegion().front()) {
                 if (isa<hec::DesignOp>(module)) {
                     hecDesign = cast<hec::DesignOp>(module);
-                    for (auto &func : *(hecDesign.getBody())) {
+                    for (auto &func : hecDesign.getBody().front()) {
                         if (auto comp = dyn_cast<hec::ComponentOp>(func)) {
-                            if (comp.style() == "STG") {
+                            if (comp.getStyle() == "STG") {
                                 chisel_code += DUMP::dumpSTGComponent(comp);
-                            } else if (comp.style() == "handshake") {
+                            } else if (comp.getStyle() == "handshake") {
                                 //assert(!found_dynamic);
                                 found_dynamic = true;
                                 chisel_code += DUMP::dumpHandShakeComponent(comp);
-                            } else if (comp.style() == "pipeline") {
+                            } else if (comp.getStyle() == "pipeline") {
                                 if (comp->getAttr("pipeline").cast<StringAttr>().getValue() == "func") {
                                     chisel_code += DUMP::dumpPipelineFunctionComponent(comp);
                                 } else {
                                     chisel_code += DUMP::dumpPipelineForComponent(comp);
                                 }
-                            } else if (comp.style() == "dummy") {
+                            } else if (comp.getStyle() == "dummy") {
                                 DUMP::dummyComponent(comp);
                             }
                         } else if (auto primitive = dyn_cast<hec::PrimitiveOp>(func)) {
-                            std::string primName = DUMP::get(primitive.primitiveName());
+                            std::string primName = DUMP::get(primitive.getPrimitiveName());
                             if (primName == "mem") {
-                                std::string memName = DUMP::get(primitive.instanceName());
+                                std::string memName = DUMP::get(primitive.getInstanceName());
                                 auto len = primitive->getAttr("len").cast<IntegerAttr>().getInt();
                                 auto type = DUMP::get(
                                         primitive->getAttr("ports").cast<StringAttr>().getValue());
@@ -1895,10 +1897,10 @@ namespace mlir {
             }
 
             if (!found_dynamic) {
-                for (auto &module : *(m.getBody())) {
+                for (auto &module : m.getBodyRegion().front()) {
                     if (auto hecDesign = dyn_cast<hec::DesignOp>(module)) {
                         chisel_code =
-                                "class " + DUMP::get(hecDesign.symbol()) + " extends MultiIOModule {\n" + chisel_code;
+                                "class " + DUMP::get(hecDesign.getSymbol()) + " extends MultiIOModule {\n" + chisel_code;
                     }
                 }
                 chisel_code += "\tval main = Module(new main)\n";
@@ -1906,10 +1908,10 @@ namespace mlir {
                 for (auto memPort : allMemOutPorts) {
                     //FIXME: Deal with arbiter number
                     auto memory = cast<hec::PrimitiveOp>(memPort.val.getDefiningOp());
-                    std::string name = DUMP::get(memory.instanceName()) + memPort.name + memPort.data;
+                    std::string name = DUMP::get(memory.getInstanceName()) + memPort.name + memPort.data;
                     int arbiterNum = DUMP::arbiterNums[name];
                     DUMP::arbiterNums[name] = arbiterNum + 1;
-                    chisel_code += "\t" + DUMP::get(memory.instanceName()) + "." + memPort.name + "(" +
+                    chisel_code += "\t" + DUMP::get(memory.getInstanceName()) + "." + memPort.name + "(" +
                                    std::to_string(arbiterNum) + ").";
                     chisel_code += memPort.data + " := main." + memPort.portName + "\n";
                 }
@@ -1925,11 +1927,11 @@ namespace mlir {
                     }
                     chisel_code += "\tmain." + memPort.portName + " := " + global_name + "\n";
                 }
-                for (auto &func : *(hecDesign.getBody())) {
+                for (auto &func : hecDesign.getBody().front()) {
                     if (auto primitive = dyn_cast<hec::PrimitiveOp>(func)) {
-                        std::string primName = DUMP::get(primitive.primitiveName());
+                        std::string primName = DUMP::get(primitive.getPrimitiveName());
                         if (primName == "mem") {
-                            std::string memName = DUMP::get(primitive.instanceName());
+                            std::string memName = DUMP::get(primitive.getInstanceName());
                             auto len = primitive->getAttr("len").cast<IntegerAttr>().getInt();
                             auto type = DUMP::get(
                                     primitive->getAttr("ports").cast<StringAttr>().getValue());
@@ -1946,13 +1948,13 @@ namespace mlir {
                     }
                 }
             } else {
-                chisel_code = "class " + DUMP::get(hecDesign.symbol()) + " extends MultiIOModule {\n" + chisel_code;
+                chisel_code = "class " + DUMP::get(hecDesign.getSymbol()) + " extends MultiIOModule {\n" + chisel_code;
 		chisel_code += "\tval main = Module(new main)\n";
                 m.walk([&](hec::ComponentOp op) {
                     if (op.getName() != "main") return;
                     auto &ports = DUMP::portNames["main"];
                     for (unsigned idx = 0; idx != op.getNumArguments(); ++idx) {
-                        if (idx < op.numInPorts()) {
+                        if (idx < op.getNumInPorts()) {
                             chisel_code += "\tval " + ports[idx] + " = IO(Flipped(DecoupledIO(" +
                                            DUMP::getType(op.getArgument(idx).getType()) + ")))\n";
                             chisel_code += "\tmain." + ports[idx] + " <> " + ports[idx] + "\n";
@@ -1965,13 +1967,13 @@ namespace mlir {
                 });
 
                 chisel_code += "\tval finish = IO(Input(Bool()))\n";
-                for (auto &component : *(hecDesign.getBody())) {
+                for (auto &component : (hecDesign.getBody().front())) {
                     if (auto hecComponent = dyn_cast<hec::ComponentOp>(component)) {
-                        for (auto &func : *(hecComponent.getBody())) {
+                        for (auto &func : hecComponent.getBody().front()) {
                             if (auto primitive = dyn_cast<hec::PrimitiveOp>(func)) {
-                                std::string primName = DUMP::get(primitive.primitiveName());
+                                std::string primName = DUMP::get(primitive.getPrimitiveName());
                                 if (primName.find("dyn_Mem") != std::string::npos) {
-                                    std::string memName = DUMP::get(primitive.instanceName());
+                                    std::string memName = DUMP::get(primitive.getInstanceName());
                                     chisel_code += "\t" + memName + ".read_address := DontCare\n";
                                     chisel_code += "\t" + memName + ".finish := DontCare\n";
                                     std::string loadnum = primName.substr(primName.find(":") + 1,

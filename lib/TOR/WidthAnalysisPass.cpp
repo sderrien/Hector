@@ -9,8 +9,8 @@
 
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include "mlir/Dialect/SCF/SCF.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+//#include "mlir/BuiDialect/StandardOps/IR/Ops.h"
 
 #include "TOR/TORDialect.h"
 #include "TOR/Passes.h"
@@ -292,11 +292,11 @@ private:
         for (auto *r : info.TrueRange)
           ValueToRange.insert(r->value, r);
 
-        buildUpdateGraph(&ifOp.thenRegion().front(), ValueToRange);
+        buildUpdateGraph(&ifOp.getThenRegion().front(), ValueToRange);
 
         SmallVector<DataRange*, 4> thenYieldOprs;
-        if (ifOp.thenRegion().front().getTerminator()) {
-          auto thenYield = llvm::dyn_cast<tor::YieldOp>(ifOp.thenRegion().front().getTerminator());
+        if (ifOp.getThenRegion().front().getTerminator()) {
+          auto thenYield = llvm::dyn_cast<tor::YieldOp>(ifOp.getThenRegion().front().getTerminator());
           for (auto opr : thenYield.getOperands())
             thenYieldOprs.push_back(ValueToRange.lookup(opr));
         }
@@ -304,17 +304,17 @@ private:
         ValueToRange.removeCurrentScope();
         
         // else region
-        if (!ifOp.elseRegion().empty()) {
+        if (!ifOp.getElseRegion().empty()) {
           ValueToRange.insertScope();
 
           for (auto *r : info.FalseRange)
             ValueToRange.insert(r->value, r);
 
-          buildUpdateGraph(&ifOp.elseRegion().front(), ValueToRange);
+          buildUpdateGraph(&ifOp.getElseRegion().front(), ValueToRange);
 
           SmallVector<DataRange*, 4> elseYieldOprs;
-          if (ifOp.elseRegion().front().getTerminator()) {
-            auto elseYield = llvm::dyn_cast<tor::YieldOp>(ifOp.elseRegion().front().getTerminator());
+          if (ifOp.getElseRegion().front().getTerminator()) {
+            auto elseYield = llvm::dyn_cast<tor::YieldOp>(ifOp.getElseRegion().front().getTerminator());
             for (auto opr : elseYield.getOperands())
               elseYieldOprs.push_back(ValueToRange.lookup(opr));
           }
@@ -337,7 +337,7 @@ private:
         } // otherwise no need to deal with yield op
       } else if (auto whileOp = llvm::dyn_cast<tor::WhileOp>(op)) {
 
-        for (auto arg : llvm::enumerate(whileOp.before().front().getArguments())) {
+        for (auto arg : llvm::enumerate(whileOp.getBefore().front().getArguments())) {
           if (!IntegerPred(arg.value()))
             continue;
           
@@ -351,9 +351,9 @@ private:
           whilePhi->addOperand(ValueToRange.lookup(whileOp.getOperand(arg.index())));
         }
 
-        buildUpdateGraph(&whileOp.before().front(), ValueToRange);
+        buildUpdateGraph(&whileOp.getBefore().front(), ValueToRange);
 
-        auto condOp = llvm::dyn_cast<tor::ConditionOp>(whileOp.before().front().getTerminator());
+        auto condOp = llvm::dyn_cast<tor::ConditionOp>(whileOp.getBefore().front().getTerminator());
 
         for (auto res : llvm::enumerate(whileOp.getResults())) {
           if (!IntegerPred(res.value()))
@@ -367,7 +367,7 @@ private:
           whileAssign->addOperand(ValueToRange.lookup(condOp.getOperand(res.index() + 1)));
         }
 
-        for (auto arg : llvm::enumerate(whileOp.before().front().getArguments())) {
+        for (auto arg : llvm::enumerate(whileOp.getBefore().front().getArguments())) {
           if (!IntegerPred(arg.value()))
             continue;
 
@@ -379,10 +379,10 @@ private:
           whileAssign->addOperand(ValueToRange.lookup(condOp.getOperand(arg.index() + 1)));
         }
 
-        buildUpdateGraph(&whileOp.after().front(), ValueToRange);
-        auto yieldOp = llvm::dyn_cast<tor::YieldOp>(whileOp.after().front().getTerminator());
+        buildUpdateGraph(&whileOp.getAfter().front(), ValueToRange);
+        auto yieldOp = llvm::dyn_cast<tor::YieldOp>(whileOp.getAfter().front().getTerminator());
 
-        for (auto arg : llvm::enumerate(whileOp.before().front().getArguments())) {
+        for (auto arg : llvm::enumerate(whileOp.getBefore().front().getArguments())) {
           if (!IntegerPred(arg.value()))
             continue;
           
@@ -400,8 +400,8 @@ private:
 
         ValueToRange.insert(forOp.getInductionVar(), iterRange);
         ValueMap.insert(std::make_pair(forOp.getInductionVar(), iterRange));
-        forRangeOp->addOperand(ValueToRange.lookup(forOp.lowerBound()));
-        forRangeOp->addOperand(ValueToRange.lookup(forOp.upperBound()));
+        forRangeOp->addOperand(ValueToRange.lookup(forOp.getLowerBound()));
+        forRangeOp->addOperand(ValueToRange.lookup(forOp.getUpperBound()));
 
         // add iteration variabls        
         
@@ -476,7 +476,7 @@ private:
     
     for (auto &&rangeOp : RangeOps) {
       if (rangeOp->type == RangeOp::TOR_OP) {
-        if (auto constOp = llvm::dyn_cast<ConstantOp>(rangeOp->op)) {
+        if (auto constOp = llvm::dyn_cast<arith::ConstantOp>(rangeOp->op)) {
           // range of result is fixed
           if (constOp.getValue().isa<FloatAttr>())
             continue;
@@ -612,7 +612,7 @@ private:
     updateUp(yRange, intersection_r(yRange->rangeDown, union_r(ytrueRange->rangeUp, yfalseRange->rangeUp)));
 
     auto cmpIOp = llvm::dyn_cast<tor::CmpIOp>(op->op);
-    switch (cmpIOp.predicate()) {
+    switch (cmpIOp.getPredicate()) {
       case tor::CmpIPredicate::sgt:
         // x > y
         updateDown(ytrueRange, intersection_r(ytrueRange->rangeUp, 
@@ -726,7 +726,7 @@ private:
     auto designOp = op->getParentOfType<tor::DesignOp>();
     assert(designOp && "Must included in a tor.design");
     designOp.walk(
-      [&] (ConstantOp constOp) {
+      [&] (arith::ConstantOp constOp) {
         if (constOp->getAttr("value").isa<FloatAttr>())
           WalkResult::skip();
         RangeOps.push_back(RangeOp::getFromOp(constOp.getOperation()));
@@ -754,7 +754,7 @@ private:
       ValueToRange.insert(arg, argRange);
     }
 
-    buildUpdateGraph(&funcOp.body().front(), ValueToRange);
+    buildUpdateGraph(&funcOp.getBody().front(), ValueToRange);
     ValueToRange.removeCurrentScope();
 
     propagateRange();
@@ -780,9 +780,9 @@ void reduceWidth(tor::FuncOp funcOp) {
         for (auto arg : forOp.getBody()->getArguments())
           updateType(arg);
       } else if (auto whileOp = llvm::dyn_cast<tor::WhileOp>(op)) {
-        for (auto arg : whileOp.before().front().getArguments())
+        for (auto arg : whileOp.getBefore().front().getArguments())
           updateType(arg);
-        for (auto arg : whileOp.after().front().getArguments())
+        for (auto arg : whileOp.getAfter().front().getArguments())
           updateType(arg);
       }
 
@@ -804,15 +804,14 @@ struct FuncOpAnalysisPattern : public OpRewritePattern<tor::FuncOp> {
 
 
   LogicalResult
-  matchAndRewrite(tor::FuncOp op, PatternRewriter &rewriter) const override 
+  matchAndRewrite(tor::FuncOp op, PatternRewriter &rewriter) const override
   {
     if (op->getAttr("bitwidth-reduced"))
       return failure();
-    rewriter.updateRootInPlace(op, 
-    [&] {
+      //rewriter.startRootUpdate(op);
       reduceWidth(op);
       op->setAttr("bitwidth-reduced", IntegerAttr::get(IntegerType::get(getContext(), 32), 1));
-    });
+      //rewriter.finalizeRootUpdate(op);
     return success();
   }
 };
@@ -826,7 +825,7 @@ struct WidthAnalysisPass : public WidthAnalysisBase<WidthAnalysisPass> {
 
     if (designOp.walk(
       [&] (tor::FuncOp op) {
-        if (failed(applyOpPatternsAndFold(op, std::move(patterns))))
+        if (failed(applyOpPatternsAndFold({op}, std::move(patterns))))
           return WalkResult::interrupt();
         return WalkResult::advance();
       }
@@ -834,7 +833,7 @@ struct WidthAnalysisPass : public WidthAnalysisBase<WidthAnalysisPass> {
       signalPassFailure();
     
     designOp.walk(
-      [&] (ConstantOp constOp) {
+      [&] (arith::ConstantOp constOp) {
         if (!constOp.getValue().isa<IntegerAttr>())
           return WalkResult::skip();
         int64_t val = constOp.getValue().cast<IntegerAttr>().getInt();
